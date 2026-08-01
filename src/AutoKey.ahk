@@ -63,20 +63,21 @@ class AutoKeyApp {
         g.AddButton("xm w160", "导入旧 ini…").OnEvent("Click", (*) => this._ImportIni())
 
         ; ── 右侧：编辑区 ──
-        g.AddText("ys w420 Section", "名称")
-        this.edName := g.AddEdit("xp w280")
+        g.AddText("ys w540 Section", "名称")
+        this.edName := g.AddEdit("xp w400")
 
         ; 点哪个 Tab，就只显示对应编辑区；另一套完全隐藏
-        this.tabMode := g.AddTab3("xp w420 h210", ["连发模式", "按键序列"])
+        this.tabMode := g.AddTab3("xp w540 h285", ["连发模式", "按键序列"])
+        this.tabMode.GetPos(&tabX, &tabY, &tabW, &tabH)
         this.tabMode.OnEvent("Change", (*) => this._OnModeChange())
 
         ; —— Tab1：连发模式 ——
         this.tabMode.UseTab(1)
-        g.AddText("w396", "可添加多个键位，按列表顺序轮流连发")
-        this.lvKeys := g.AddListView("w396 r5", ["#", "按键", "间隔ms"])
+        g.AddText("w516", "可添加多个键位，按列表顺序轮流连发")
+        this.lvKeys := g.AddListView("w516 r7", ["#", "按键", "间隔ms"])
         this.lvKeys.ModifyCol(1, 36)
-        this.lvKeys.ModifyCol(2, 220)
-        this.lvKeys.ModifyCol(3, 90)
+        this.lvKeys.ModifyCol(2, 340)
+        this.lvKeys.ModifyCol(3, 110)
 
         g.AddText(, "按键")
         this.edSingleKey := g.AddEdit("x+6 yp-3 w88")
@@ -90,20 +91,20 @@ class AutoKeyApp {
         this.btnKeyEdit.OnEvent("Click", (*) => this._EditSpamKey())
         this.btnKeyDel := g.AddButton("x+4 w52", "删除")
         this.btnKeyDel.OnEvent("Click", (*) => this._RemoveSpamKey())
-        this.btnKeyUp := g.AddButton("y+8 w52", "上移")
+        this.btnKeyUp := g.AddButton("xm+184 y+8 w52", "上移")
         this.btnKeyUp.OnEvent("Click", (*) => this._MoveSpamKey(-1))
         this.btnKeyDown := g.AddButton("x+4 w52", "下移")
         this.btnKeyDown.OnEvent("Click", (*) => this._MoveSpamKey(1))
 
         ; —— Tab2：按键序列 ——
         this.tabMode.UseTab(2)
-        g.AddText("w396", "按顺序执行步骤，可含按键 / 等待 / 点击")
-        this.lvSteps := g.AddListView("w396 r5", ["#", "类型", "内容", "延迟ms", "按住ms"])
-        this.lvSteps.ModifyCol(1, 30)
-        this.lvSteps.ModifyCol(2, 50)
-        this.lvSteps.ModifyCol(3, 140)
-        this.lvSteps.ModifyCol(4, 70)
-        this.lvSteps.ModifyCol(5, 70)
+        g.AddText("w516", "按顺序执行步骤，可含按键 / 等待 / 点击")
+        this.lvSteps := g.AddListView("w516 r7", ["#", "类型", "内容", "延迟ms", "按住ms"])
+        this.lvSteps.ModifyCol(1, 36)
+        this.lvSteps.ModifyCol(2, 60)
+        this.lvSteps.ModifyCol(3, 230)
+        this.lvSteps.ModifyCol(4, 80)
+        this.lvSteps.ModifyCol(5, 80)
 
         this.btnStepAdd := g.AddButton("w72", "添加")
         this.btnStepAdd.OnEvent("Click", (*) => this._AddStep())
@@ -119,7 +120,8 @@ class AutoKeyApp {
         ; —— 公共设置（不在 Tab 内）——
         this.tabMode.UseTab(0)
 
-        g.AddGroupBox("xm+172 y+10 w420 h88", "循环与热键")
+        ; 明确放在 Tab 底部之后，避免被 Tab 遮挡
+        g.AddGroupBox("x" tabX " y" (tabY + tabH + 10) " w540 h88", "循环与热键")
         this.chkLoop := g.AddCheckbox("xp+12 yp+22 Checked", "循环")
         g.AddText("x+8", "轮间隔 ms")
         this.edLoopDelay := g.AddEdit("x+6 w60 Number", "200")
@@ -136,14 +138,14 @@ class AutoKeyApp {
         this.edPauseHk := g.AddEdit("x+6 w56", "F8")
         g.AddButton("x+4 w44", "捕捉").OnEvent("Click", (*) => this._CaptureInto("pause"))
 
-        g.AddGroupBox("xm+172 y+14 w420 h100", "目标窗口（可留空 = 当前前台）")
+        g.AddGroupBox("x" tabX " y+14 w540 h100", "目标窗口（可留空 = 当前前台）")
         g.AddText("xp+12 yp+22", "进程 exe")
-        this.edExe := g.AddEdit("x+6 w200")
+        this.edExe := g.AddEdit("x+6 w300")
         g.AddButton("x+6 w80", "取前台").OnEvent("Click", (*) => this._PickForeground())
         g.AddText("xm+184 y+8", "标题包含")
-        this.edTitle := g.AddEdit("x+6 w140")
+        this.edTitle := g.AddEdit("x+6 w200")
         g.AddText("x+8", "类名")
-        this.edClass := g.AddEdit("x+6 w100")
+        this.edClass := g.AddEdit("x+6 w140")
         this.chkActivate := g.AddCheckbox("xm+184 y+8 Checked", "发送前激活")
         g.AddText("x+12", "发送模式")
         this.ddlSend := g.AddDropDownList("x+6 w110", ["Send", "ControlSend"])
@@ -151,7 +153,7 @@ class AutoKeyApp {
 
         ; 底部操作
         g.AddText("xm+172 y+16", "状态")
-        this.txtStatus := g.AddEdit("x+8 w340 ReadOnly", "就绪")
+        this.txtStatus := g.AddEdit("x+8 w460 ReadOnly", "就绪")
 
         this.btnApply := g.AddButton("xm+172 y+10 w100 Default", "保存并应用")
         this.btnApply.OnEvent("Click", (*) => this._ApplyFromUi(true))
@@ -162,7 +164,7 @@ class AutoKeyApp {
         this.btnPause := g.AddButton("x+8 w80", "暂停")
         this.btnPause.OnEvent("Click", (*) => this.TogglePause())
 
-        g.AddText("xm+172 y+10 cGray w420", "提示：点上方 Tab 切换编辑区。改完点「保存并应用」。停止热键始终有效。")
+        g.AddText("xm+172 y+10 cGray w540", "提示：点上方 Tab 切换编辑区。改完点「保存并应用」。停止热键始终有效。")
 
         this.gui := g
         this._OnModeChange()
@@ -372,16 +374,17 @@ class AutoKeyApp {
         return m
     }
 
+    /** @returns {Integer} 1=已应用 0=失败（已提示原因） */
     _ApplyFromUi(showTip := true) {
         if this.seq && this.seq.IsRunning {
             MsgBox("运行中无法保存，请先停止。", "AutoKey", "Icon!")
-            return
+            return 0
         }
         try {
             m := this._CollectFromUi()
         } catch as e {
             MsgBox(e.Message, "AutoKey", "Icon!")
-            return
+            return 0
         }
         this.store.ReplaceActive(m)
         this._ReloadMacroList(m.id)
@@ -396,6 +399,7 @@ class AutoKeyApp {
             this._SetStatus("已保存并应用: " m.name)
         else
             this._SetStatus("就绪 — " m.name)
+        return 1
     }
 
     ; ───────── 连发键位编辑 ─────────
@@ -708,10 +712,17 @@ class AutoKeyApp {
             return
         }
         try {
-            this.edExe.Value := WinGetProcessName(hwnd)
-            this.edTitle.Value := WinGetTitle(hwnd)
-            this.edClass.Value := WinGetClass(hwnd)
-            this._SetStatus("已填入: " this.edExe.Value)
+            if (WinGetPID(hwnd) = DllCall("GetCurrentProcessId", "UInt")) {
+                this._SetStatus("取到的是 AutoKey 自己，请在 3 秒内切到目标程序")
+                return
+            }
+            exe := WinGetProcessName(hwnd)
+            ; 只锁进程名：标题会随内容变化（记事本的 *、浏览器换标签），
+            ; 存下来反而会导致之后永远匹配不上
+            this.edExe.Value := exe
+            this.edTitle.Value := ""
+            this.edClass.Value := ""
+            this._SetStatus("已锁定进程 " exe "；同名窗口多时可再填标题关键字")
         } catch as e {
             this._SetStatus("获取失败: " e.Message)
         }
@@ -750,18 +761,13 @@ class AutoKeyApp {
     }
 
     Start() {
-        if !this.seq {
-            ; 尝试先应用
-            this._ApplyFromUi(false)
-        }
-        if !this.seq {
-            MsgBox("请先保存并应用配置。", "AutoKey", "Icon!")
-            return
-        }
-        if this.seq.IsRunning {
+        if (this.seq && this.seq.IsRunning) {
             this._SetStatus("已在运行")
             return
         }
+        ; 每次开始都以界面上的当前内容为准，避免改了目标窗口却忘了「保存并应用」
+        if !this._ApplyFromUi(false)
+            return
         this.seq.Start()
     }
 

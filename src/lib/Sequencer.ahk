@@ -54,7 +54,7 @@ class Sequencer {
 
                 hwnd := this.target.EnsureReady()
                 if !hwnd {
-                    this._Notify("未找到目标窗口，等待中…")
+                    this._Notify("未找到目标窗口 [" this.target.Describe() "]，等待中…")
                     Sleep 500
                     if this._stopRequested
                         break

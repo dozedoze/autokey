@@ -15,20 +15,26 @@ class WindowTarget {
     /** @returns {Integer} 窗口 HWND，找不到返回 0 */
     Find() {
         if (this.exe != "") {
+            wantExe := StrLower(this.exe)
+            ; 有标题的窗口优先，避免命中同进程的隐形/工具窗口
+            best := 0
             for hwnd in WinGetList() {
                 try {
-                    if (StrLower(WinGetProcessName(hwnd)) = StrLower(this.exe)) {
-                        if (this.title != "" && !InStr(WinGetTitle(hwnd), this.title))
-                            continue
-                        if (this.winClass != "" && WinGetClass(hwnd) != this.winClass)
-                            continue
+                    if (StrLower(WinGetProcessName(hwnd)) != wantExe)
+                        continue
+                    if (this.title != "" && !InStr(WinGetTitle(hwnd), this.title))
+                        continue
+                    if (this.winClass != "" && WinGetClass(hwnd) != this.winClass)
+                        continue
+                    if (WinGetTitle(hwnd) != "")
                         return hwnd
-                    }
+                    if !best
+                        best := hwnd
                 } catch {
                     continue
                 }
             }
-            return 0
+            return best
         }
 
         criteria := ""
