@@ -49,6 +49,7 @@ class Sequencer {
         this.paused := false
         this.running := false
         try SetTimer(this._tickFn, 0)
+        try this.target.Release()
         this._Notify("已停止")
     }
 
@@ -100,11 +101,13 @@ class Sequencer {
             cfg := this.cfg
             if !cfg.loop {
                 this.running := false
+                try this.target.Release()
                 this._Notify("已完成")
                 return
             }
             if (cfg.repeat > 0 && this._loopsDone >= cfg.repeat) {
                 this.running := false
+                try this.target.Release()
                 this._Notify("已完成")
                 return
             }

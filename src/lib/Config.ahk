@@ -20,6 +20,8 @@ class MacroConfig {
         this.targetExe := ""
         this.targetTitle := ""
         this.targetClass := ""
+        this.targetIndex := 0          ; 同 exe 多开时用第几个窗口，0=自动
+        this.targetHwnd := 0           ; 锁定的窗口句柄，仅本次运行有效，不写入 ini
         this.activate := 0
         this.sendMode := "ControlSend"
         this.steps := []
@@ -87,6 +89,7 @@ class MacroConfig {
             "loop", "loopDelay", "repeat",
             "startHotkey", "stopHotkey", "pauseHotkey",
             "targetExe", "targetTitle", "targetClass",
+            "targetIndex", "targetHwnd",
             "activate", "sendMode"
         ]
             c.%prop% := this.%prop%
@@ -145,6 +148,7 @@ class MacroConfig {
         cfg.targetExe := IniRead(path, "Target", "Exe", "")
         cfg.targetTitle := IniRead(path, "Target", "Title", "")
         cfg.targetClass := IniRead(path, "Target", "Class", "")
+        cfg.targetIndex := Integer(IniRead(path, "Target", "Index", "0"))
         cfg.activate := Integer(IniRead(path, "Target", "Activate", "0"))
         cfg.sendMode := IniRead(path, "Target", "SendMode", "ControlSend")
 
@@ -416,6 +420,8 @@ class MacroStore {
             IniWrite(m.targetExe, path, sec, "TargetExe")
             IniWrite(m.targetTitle, path, sec, "TargetTitle")
             IniWrite(m.targetClass, path, sec, "TargetClass")
+            ; targetHwnd 只在本次运行有效，重启后窗口句柄会变，不落盘
+            IniWrite(Integer(m.targetIndex), path, sec, "TargetIndex")
             IniWrite(m.activate, path, sec, "Activate")
             IniWrite(m.sendMode, path, sec, "SendMode")
             IniWrite(m.steps.Length, path, sec, "StepCount")
@@ -479,6 +485,8 @@ class MacroStore {
             m.targetExe := IniRead(path, sec, "TargetExe", "")
             m.targetTitle := IniRead(path, sec, "TargetTitle", "")
             m.targetClass := IniRead(path, sec, "TargetClass", "")
+            m.targetIndex := Integer(IniRead(path, sec, "TargetIndex", "0"))
+            m.targetHwnd := 0
             m.activate := Integer(IniRead(path, sec, "Activate", "0"))
             m.sendMode := IniRead(path, sec, "SendMode", "ControlSend")
             count := Integer(IniRead(path, sec, "StepCount", "0"))

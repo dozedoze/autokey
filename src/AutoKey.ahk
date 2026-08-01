@@ -56,6 +56,7 @@ class AutoKeyApp {
         this._loadingUi := false
         this._capturing := false
         this._runMark := ""
+        this._lockHwnd := 0
 
         this._InitTray()
         this._BuildGui()
@@ -169,7 +170,7 @@ class AutoKeyApp {
         this.edPauseHk := g.AddEdit("x+6 w56", "F8")
         g.AddButton("x+4 w44", "捕捉").OnEvent("Click", (*) => this._CaptureInto("pause"))
 
-        g.AddGroupBox("x" tabX " y+14 w540 h100", "目标窗口（可留空 = 当前前台）")
+        g.AddGroupBox("x" tabX " y+14 w540 h146", "目标窗口（可留空 = 当前前台）")
         g.AddText("xp+12 yp+22", "进程 exe")
         this.edExe := g.AddEdit("x+6 w300")
         g.AddButton("x+6 w80", "取前台").OnEvent("Click", (*) => this._PickForeground())
@@ -177,6 +178,11 @@ class AutoKeyApp {
         this.edTitle := g.AddEdit("x+6 w200")
         g.AddText("x+8", "类名")
         this.edClass := g.AddEdit("x+6 w140")
+        g.AddText("xm+184 y+8", "窗口 #")
+        this.edWinIndex := g.AddEdit("x+6 w44 Number", "0")
+        g.AddText("x+6 cGray", "0=自动")
+        g.AddButton("x+8 w86", "选窗口…").OnEvent("Click", (*) => this._PickWindowFromList())
+        this.txtLock := g.AddText("x+8 w250 cGray", "未锁定具体窗口")
         this.chkActivate := g.AddCheckbox("xm+184 y+8", "发送前激活")
         g.AddText("x+12", "发送模式")
         this.ddlSend := g.AddDropDownList("x+6 w110", ["Send", "ControlSend"])
@@ -231,6 +237,8 @@ class AutoKeyApp {
             ; 同 exe 多套时在列表里带上标题，方便区分
             if (m.targetExe != "" && this._CountExe(m.targetExe) > 1) {
                 tip := m.targetTitle != "" ? m.targetTitle : m.targetExe
+                if (m.targetIndex > 0)
+                    tip .= " #" m.targetIndex
                 label .= "  [" tip "]"
             }
             names.Push(label)
@@ -372,12 +380,11 @@ class AutoKeyApp {
         if (peers.Length = 0)
             return
 
-        ; 当前这套若没填标题，提示用户
-        if (m.targetTitle = "") {
-            this._SetStatus("同进程已有其它配置，请填写「标题包含」以区分窗口")
-        }
+        ; 同进程多套配置又没有任何区分手段时提醒一下
+        if (m.targetTitle = "" && !m.targetHwnd && m.targetIndex <= 0)
+            this._SetStatus("同进程已有其它配置：建议用「选窗口…」锁定，或填「窗口 #」区分")
 
-        tip := m.targetTitle != "" ? m.targetTitle : m.targetExe
+        tip := m.targetTitle != "" ? m.targetTitle : (m.targetIndex > 0 ? "#" m.targetIndex : m.targetExe)
         ; 名称里尚无区分信息则追加
         if !InStr(m.name, tip) && !InStr(m.name, "[") {
             base := RegExReplace(m.name, "\s*[\[\(].*$", "")
@@ -425,6 +432,9 @@ class AutoKeyApp {
         this.edExe.Value := m.targetExe
         this.edTitle.Value := m.targetTitle
         this.edClass.Value := m.targetClass
+        this.edWinIndex.Value := Integer(m.targetIndex)
+        this._lockHwnd := Integer(m.targetHwnd)
+        this._UpdateLockText()
         this.chkActivate.Value := m.activate ? 1 : 0
         this.ddlSend.Choose(m.sendMode = "ControlSend" ? 2 : 1)
         this._RefreshKeyList(m)
@@ -490,6 +500,8 @@ class AutoKeyApp {
         m.targetExe := Trim(this.edExe.Value)
         m.targetTitle := Trim(this.edTitle.Value)
         m.targetClass := Trim(this.edClass.Value)
+        m.targetIndex := Integer(this.edWinIndex.Value || 0)
+        m.targetHwnd := Integer(this._lockHwnd)
         m.activate := this.chkActivate.Value ? 1 : 0
         m.sendMode := this.ddlSend.Text
 
@@ -908,6 +920,10 @@ class AutoKeyApp {
             tip := this._TitleHint(title)
             this.edTitle.Value := tip
             this.edClass.Value := ""
+            ; 多开时标题往往一模一样，直接把句柄也锁上才靠谱
+            this._lockHwnd := hwnd + 0
+            this.edWinIndex.Value := this._IndexOfWindow(exe, hwnd)
+            this._UpdateLockText()
 
             ; 名称自动带上区分信息
             base := Trim(this.edName.Value)
@@ -918,10 +934,92 @@ class AutoKeyApp {
             else
                 this.edName.Value := this._UniqueName(base, this.store.activeId)
 
-            this._SetStatus("已锁定 " exe (tip != "" ? " / 标题~" tip : "") "（后台发送，无需聚焦）")
+            this._SetStatus("已锁定窗口 " hwnd "（" exe "，第 " this.edWinIndex.Value " 个）— 后台发送，无需聚焦")
         } catch as e {
             this._SetStatus("获取失败: " e.Message)
         }
+    }
+
+    _UpdateLockText() {
+        if !this._lockHwnd {
+            this.txtLock.Value := "未锁定具体窗口"
+            return
+        }
+        title := ""
+        try title := WinGetTitle("ahk_id " this._lockHwnd)
+        if (title = "")
+            this.txtLock.Value := "锁定窗口 " this._lockHwnd "（已关闭）"
+        else
+            this.txtLock.Value := "已锁定 " this._lockHwnd "：" SubStr(title, 1, 24)
+    }
+
+    /** 该窗口在同 exe 窗口里排第几（与运行时的「窗口 #」一致） */
+    _IndexOfWindow(exe, hwnd) {
+        for i, w in WindowTarget.ListWindows(exe) {
+            if (w.hwnd = hwnd + 0)
+                return i
+        }
+        return 0
+    }
+
+    /** 列出候选窗口让用户直接点一个，多开时唯一可靠的区分方式 */
+    _PickWindowFromList() {
+        exe := Trim(this.edExe.Value)
+        wins := WindowTarget.ListWindows(exe)
+        if (wins.Length = 0) {
+            MsgBox(exe != "" ? "没找到 " exe " 的可见窗口。" : "没找到可见窗口。", "AutoKey", "Icon!")
+            return
+        }
+
+        d := Gui("+Owner" this.gui.Hwnd " +AlwaysOnTop", "选择目标窗口")
+        d.SetFont("s9", "Segoe UI")
+        d.AddText(, "同一程序多开时，选中具体那个窗口（关闭后需重选）")
+        lv := d.AddListView("w620 r12", ["#", "窗口标题", "进程", "句柄", "类名"])
+        lv.ModifyCol(1, 34)
+        lv.ModifyCol(2, 300)
+        lv.ModifyCol(3, 110)
+        lv.ModifyCol(4, 80)
+        lv.ModifyCol(5, 90)
+        for i, w in wins
+            lv.Add(, i, w.title, w.exe, w.hwnd, w.cls)
+        if (this._lockHwnd) {
+            for i, w in wins {
+                if (w.hwnd = this._lockHwnd)
+                    lv.Modify(i, "Select Focus")
+            }
+        }
+
+        OnOk(*) {
+            row := lv.GetNext()
+            if !row {
+                MsgBox("请先选中一个窗口。", "AutoKey", "Icon!")
+                return
+            }
+            sel := wins[row]
+            this._lockHwnd := sel.hwnd
+            this.edExe.Value := sel.exe
+            this.edWinIndex.Value := row
+            this._UpdateLockText()
+            this._SetStatus("已锁定窗口 " sel.hwnd "：" sel.title)
+            d.Destroy()
+        }
+        OnUnlock(*) {
+            this._lockHwnd := 0
+            this._UpdateLockText()
+            this._SetStatus("已取消窗口锁定，按「窗口 #」序号匹配")
+            d.Destroy()
+        }
+        OnCancel(*) {
+            d.Destroy()
+        }
+
+        d.AddButton("w120 Default", "锁定这个窗口").OnEvent("Click", OnOk)
+        d.AddButton("x+10 w100", "取消锁定").OnEvent("Click", OnUnlock)
+        d.AddButton("x+10 w100", "关闭").OnEvent("Click", OnCancel)
+        d.OnEvent("Close", OnCancel)
+        hwnd := d.Hwnd
+        d.Show()
+        WinWaitClose("ahk_id " hwnd)
     }
 
     _TitleHint(title) {
