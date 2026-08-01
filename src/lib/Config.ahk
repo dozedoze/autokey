@@ -20,8 +20,8 @@ class MacroConfig {
         this.targetExe := ""
         this.targetTitle := ""
         this.targetClass := ""
-        this.activate := 1
-        this.sendMode := "Send"
+        this.activate := 0
+        this.sendMode := "ControlSend"
         this.steps := []
 
         if IsSet(opt) && opt is Map {
@@ -145,8 +145,8 @@ class MacroConfig {
         cfg.targetExe := IniRead(path, "Target", "Exe", "")
         cfg.targetTitle := IniRead(path, "Target", "Title", "")
         cfg.targetClass := IniRead(path, "Target", "Class", "")
-        cfg.activate := Integer(IniRead(path, "Target", "Activate", "1"))
-        cfg.sendMode := IniRead(path, "Target", "SendMode", "Send")
+        cfg.activate := Integer(IniRead(path, "Target", "Activate", "0"))
+        cfg.sendMode := IniRead(path, "Target", "SendMode", "ControlSend")
 
         section := IniRead(path, "Sequence")
         if (section = "ERROR" || section = "")
@@ -466,8 +466,8 @@ class MacroStore {
             m.targetExe := IniRead(path, sec, "TargetExe", "")
             m.targetTitle := IniRead(path, sec, "TargetTitle", "")
             m.targetClass := IniRead(path, sec, "TargetClass", "")
-            m.activate := Integer(IniRead(path, sec, "Activate", "1"))
-            m.sendMode := IniRead(path, sec, "SendMode", "Send")
+            m.activate := Integer(IniRead(path, sec, "Activate", "0"))
+            m.sendMode := IniRead(path, sec, "SendMode", "ControlSend")
             count := Integer(IniRead(path, sec, "StepCount", "0"))
             loop count {
                 line := IniRead(path, sec, "Step" A_Index, "")
@@ -499,6 +499,8 @@ class MacroStore {
         seq.startHotkey := "F9"
         seq.stopHotkey := "F10"
         seq.pauseHotkey := "F11"
+        seq.activate := 0
+        seq.sendMode := "ControlSend"
         seq.steps := [
             MacroConfig.NewStep("key", "1", 300),
             MacroConfig.NewStep("key", "2", 500),
@@ -523,6 +525,8 @@ class MacroStore {
         m.startHotkey := "F6"
         m.stopHotkey := "F7"
         m.pauseHotkey := "F8"
+        m.activate := 0
+        m.sendMode := "ControlSend"
         return m
     }
 

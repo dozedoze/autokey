@@ -23,6 +23,7 @@ class AutoKeyApp {
         this.cfg := ""
         this.target := ""
         this.seq := ""
+        this.runners := Map()   ; macroId -> Sequencer（可并行）
         this._boundHotkeys := []
         this._loadingUi := false
         this._capturing := false
@@ -39,9 +40,10 @@ class AutoKeyApp {
         A_TrayMenu.Delete()
         A_TrayMenu.Add("显示主窗口", (*) => this.gui.Show())
         A_TrayMenu.Add()
-        A_TrayMenu.Add("开始", (*) => this.Start())
-        A_TrayMenu.Add("停止", (*) => this.Stop())
-        A_TrayMenu.Add("暂停/继续", (*) => this.TogglePause())
+        A_TrayMenu.Add("开始当前", (*) => this.Start())
+        A_TrayMenu.Add("停止当前", (*) => this.Stop())
+        A_TrayMenu.Add("全部停止", (*) => this.StopAll())
+        A_TrayMenu.Add("暂停/继续当前", (*) => this.TogglePause())
         A_TrayMenu.Add()
         A_TrayMenu.Add("退出", (*) => this._Quit())
         A_TrayMenu.Default := "显示主窗口"
@@ -146,10 +148,10 @@ class AutoKeyApp {
         this.edTitle := g.AddEdit("x+6 w200")
         g.AddText("x+8", "类名")
         this.edClass := g.AddEdit("x+6 w140")
-        this.chkActivate := g.AddCheckbox("xm+184 y+8 Checked", "发送前激活")
+        this.chkActivate := g.AddCheckbox("xm+184 y+8", "发送前激活")
         g.AddText("x+12", "发送模式")
         this.ddlSend := g.AddDropDownList("x+6 w110", ["Send", "ControlSend"])
-        this.ddlSend.Choose(1)
+        this.ddlSend.Choose(2)
 
         ; 底部操作
         g.AddText("xm+172 y+16", "状态")
@@ -157,14 +159,16 @@ class AutoKeyApp {
 
         this.btnApply := g.AddButton("xm+172 y+10 w100 Default", "保存并应用")
         this.btnApply.OnEvent("Click", (*) => this._ApplyFromUi(true))
-        this.btnStart := g.AddButton("x+8 w80", "开始")
+        this.btnStart := g.AddButton("x+8 w72", "开始")
         this.btnStart.OnEvent("Click", (*) => this.Start())
-        this.btnStop := g.AddButton("x+8 w80", "停止")
+        this.btnStop := g.AddButton("x+8 w72", "停止")
         this.btnStop.OnEvent("Click", (*) => this.Stop())
-        this.btnPause := g.AddButton("x+8 w80", "暂停")
+        this.btnPause := g.AddButton("x+8 w72", "暂停")
         this.btnPause.OnEvent("Click", (*) => this.TogglePause())
+        this.btnStopAll := g.AddButton("x+8 w88", "全部停止")
+        this.btnStopAll.OnEvent("Click", (*) => this.StopAll())
 
-        g.AddText("xm+172 y+10 cGray w540", "提示：点上方 Tab 切换编辑区。改完点「保存并应用」。停止热键始终有效。")
+        g.AddText("xm+172 y+10 cGray w540", "提示：多套配置可同时运行。同进程多窗口请填「标题包含」区分。默认后台 ControlSend，无需聚焦。")
 
         this.gui := g
         this._OnModeChange()
@@ -184,7 +188,15 @@ class AutoKeyApp {
         choose := 1
         want := selectId != "" ? selectId : this.store.activeId
         for i, m in this.store.macros {
-            names.Push(m.name)
+            label := m.name
+            if this._IsRunnerActive(m.id)
+                label := "▶ " label
+            ; 同 exe 多套时在列表里带上标题，方便区分
+            if (m.targetExe != "" && this._CountExe(m.targetExe) > 1) {
+                tip := m.targetTitle != "" ? m.targetTitle : m.targetExe
+                label .= "  [" tip "]"
+            }
+            names.Push(label)
             if (m.id = want)
                 choose := i
         }
@@ -195,6 +207,20 @@ class AutoKeyApp {
         this._loadingUi := false
     }
 
+    _CountExe(exe) {
+        n := 0
+        want := StrLower(exe)
+        for m in this.store.macros {
+            if (StrLower(m.targetExe) = want)
+                n++
+        }
+        return n
+    }
+
+    _IsRunnerActive(id) {
+        return this.runners.Has(id) && this.runners[id].IsRunning
+    }
+
     _OnSelectMacro() {
         if this._loadingUi
             return
@@ -202,36 +228,32 @@ class AutoKeyApp {
         if (idx < 1)
             return
         m := this.store.macros[idx]
-        if this.seq && this.seq.IsRunning {
-            MsgBox("请先停止当前运行，再切换配置。", "AutoKey", "Icon!")
-            this._ReloadMacroList(this.store.activeId)
-            return
-        }
+        ; 允许切换查看其它配置；其它配置可继续在后台跑
         this.store.SetActive(m.id)
         this._LoadActiveIntoUi()
-        this._ApplyFromUi(false)
+        ; 同步当前编辑器对应的 cfg/seq 引用（不打断其它 runner）
+        this._SyncActiveRefs(false)
     }
 
     _NewMacro() {
-        if this.seq && this.seq.IsRunning {
-            MsgBox("请先停止运行。", "AutoKey", "Icon!")
-            return
-        }
         Result := InputBox("输入新配置名称", "新建配置", , "新配置")
         if (Result.Result = "Cancel")
             return
         name := Trim(Result.Value)
         if (name = "")
             name := "新配置"
+        name := this._UniqueName(name)
         m := MacroConfig()
         m.name := name
         m.mode := "single"
         m.keys := [MacroConfig.NewKey("{Space}", 50)]
         m.SyncLegacySingle()
+        m.activate := 0
+        m.sendMode := "ControlSend"
         this.store.Add(m)
         this._ReloadMacroList(m.id)
         this._LoadActiveIntoUi()
-        this._ApplyFromUi(false)
+        this._SyncActiveRefs(false)
         this._SetStatus("已新建: " name)
     }
 
@@ -240,18 +262,74 @@ class AutoKeyApp {
             MsgBox("至少保留一套配置。", "AutoKey", "Icon!")
             return
         }
-        if this.seq && this.seq.IsRunning {
-            MsgBox("请先停止运行。", "AutoKey", "Icon!")
+        m := this.store.Active()
+        if this._IsRunnerActive(m.id) {
+            MsgBox("请先停止「" m.name "」再删除。", "AutoKey", "Icon!")
             return
         }
-        m := this.store.Active()
         if MsgBox("确定删除「" m.name "」？", "AutoKey", "YesNo Icon?") != "Yes"
             return
+        this.runners.Delete(m.id)
         this.store.Remove(m.id)
         this._ReloadMacroList()
         this._LoadActiveIntoUi()
-        this._ApplyFromUi(false)
+        this._SyncActiveRefs(false)
+        this._RebindAllHotkeys()
         this._SetStatus("已删除")
+    }
+
+    /** 保证配置名称在列表里唯一 */
+    _UniqueName(base, exceptId := "") {
+        name := base
+        n := 2
+        loop {
+            clash := false
+            for m in this.store.macros {
+                if (exceptId != "" && m.id = exceptId)
+                    continue
+                if (m.name = name) {
+                    clash := true
+                    break
+                }
+            }
+            if !clash
+                return name
+            name := base " #" n
+            n++
+        }
+    }
+
+    /**
+     * 同 exe 多套配置时，自动用标题片段区分名称。
+     */
+    _DistinguishSameAppName(m) {
+        if (m.targetExe = "")
+            return
+        peers := []
+        for other in this.store.macros {
+            if (other.id = m.id)
+                continue
+            if (StrLower(other.targetExe) = StrLower(m.targetExe))
+                peers.Push(other)
+        }
+        if (peers.Length = 0)
+            return
+
+        ; 当前这套若没填标题，提示用户
+        if (m.targetTitle = "") {
+            this._SetStatus("同进程已有其它配置，请填写「标题包含」以区分窗口")
+        }
+
+        tip := m.targetTitle != "" ? m.targetTitle : m.targetExe
+        ; 名称里尚无区分信息则追加
+        if !InStr(m.name, tip) && !InStr(m.name, "[") {
+            base := RegExReplace(m.name, "\s*[\[\(].*$", "")
+            base := Trim(base)
+            if (base = "")
+                base := "配置"
+            m.name := this._UniqueName(base " [" tip "]", m.id)
+            this.edName.Value := m.name
+        }
     }
 
     _ImportIni() {
@@ -376,8 +454,9 @@ class AutoKeyApp {
 
     /** @returns {Integer} 1=已应用 0=失败（已提示原因） */
     _ApplyFromUi(showTip := true) {
-        if this.seq && this.seq.IsRunning {
-            MsgBox("运行中无法保存，请先停止。", "AutoKey", "Icon!")
+        id := this.store.activeId
+        if this._IsRunnerActive(id) {
+            MsgBox("「" this.store.Active().name "」正在运行，请先停止再保存。", "AutoKey", "Icon!")
             return 0
         }
         try {
@@ -386,20 +465,61 @@ class AutoKeyApp {
             MsgBox(e.Message, "AutoKey", "Icon!")
             return 0
         }
+        m.name := this._UniqueName(m.name, m.id)
+        this._DistinguishSameAppName(m)
         this.store.ReplaceActive(m)
         this._ReloadMacroList(m.id)
-
-        this._UnbindHotkeys()
-        this.cfg := m
-        this.target := WindowTarget(m)
-        this.seq := Sequencer(m, this.target)
-        this.seq.onStatus := (t) => this._SetStatus(t)
-        this._BindHotkeys(m)
+        this._SyncActiveRefs(true)
+        this._RebindAllHotkeys()
         if showTip
             this._SetStatus("已保存并应用: " m.name)
         else
-            this._SetStatus("就绪 — " m.name)
+            this._RefreshStatusBar()
         return 1
+    }
+
+    /** 把当前 active 配置同步到 this.cfg / this.target / this.seq（不启动） */
+    _SyncActiveRefs(rebuildSeq := true) {
+        m := this.store.Active()
+        this.cfg := m
+        this.target := WindowTarget(m)
+        if rebuildSeq || !this.runners.Has(m.id) {
+            seq := Sequencer(m, this.target)
+            mid := m.id
+            seq.onStatus := (t) => this._OnRunnerStatus(mid, t)
+            this.runners[m.id] := seq
+        }
+        this.seq := this.runners[m.id]
+    }
+
+    _OnRunnerStatus(id, text) {
+        m := this.store.GetById(id)
+        name := m ? m.name : id
+        ; 只在状态栏详细显示当前选中配置；其它配置变化时刷新列表标记
+        if (id = this.store.activeId)
+            this._SetStatus(name ": " text)
+        else
+            this._RefreshStatusBar()
+        this._ReloadMacroList(this.store.activeId)
+    }
+
+    _RefreshStatusBar() {
+        running := []
+        for id, seq in this.runners {
+            if seq.IsRunning {
+                m := this.store.GetById(id)
+                running.Push(m ? m.name : id)
+            }
+        }
+        if (running.Length = 0) {
+            cur := this.store.Active()
+            this._SetStatus("就绪 — " (cur ? cur.name : ""))
+            return
+        }
+        out := "运行中(" running.Length "): "
+        for i, n in running
+            out .= (i = 1 ? "" : ", ") n
+        this._SetStatus(out)
     }
 
     ; ───────── 连发键位编辑 ─────────
@@ -685,7 +805,7 @@ class AutoKeyApp {
                 out := this._FormatKeyName(ih.EndKey)
         }
         if this.cfg
-            this._BindHotkeys(this.cfg)
+            this._RebindAllHotkeys()
         return out
     }
 
@@ -717,34 +837,66 @@ class AutoKeyApp {
                 return
             }
             exe := WinGetProcessName(hwnd)
-            ; 只锁进程名：标题会随内容变化（记事本的 *、浏览器换标签），
-            ; 存下来反而会导致之后永远匹配不上
+            title := WinGetTitle(hwnd)
             this.edExe.Value := exe
-            this.edTitle.Value := ""
+            ; 同进程多窗口用标题关键字区分；截一段稳定前缀
+            tip := this._TitleHint(title)
+            this.edTitle.Value := tip
             this.edClass.Value := ""
-            this._SetStatus("已锁定进程 " exe "；同名窗口多时可再填标题关键字")
+
+            ; 名称自动带上区分信息
+            base := Trim(this.edName.Value)
+            if (base = "" || base = "新配置" || base = "连发" || base = "未命名")
+                base := StrReplace(exe, ".exe", "")
+            if (tip != "")
+                this.edName.Value := this._UniqueName(base " [" tip "]", this.store.activeId)
+            else
+                this.edName.Value := this._UniqueName(base, this.store.activeId)
+
+            this._SetStatus("已锁定 " exe (tip != "" ? " / 标题~" tip : "") "（后台发送，无需聚焦）")
         } catch as e {
             this._SetStatus("获取失败: " e.Message)
         }
     }
 
+    _TitleHint(title) {
+        title := Trim(title)
+        if (title = "")
+            return ""
+        ; 取 " - " 前一段，或截前 16 字
+        if (p := InStr(title, " - "))
+            title := SubStr(title, 1, p - 1)
+        if (StrLen(title) > 16)
+            title := SubStr(title, 1, 16)
+        return title
+    }
+
     ; ───────── 热键 / 运行 ─────────
 
-    _BindHotkeys(cfg) {
-        this._boundHotkeys := []
-        try {
-            Hotkey(cfg.startHotkey, (*) => this.Start(), "On")
-            this._boundHotkeys.Push(cfg.startHotkey)
-        } catch {
-            this._SetStatus("开始热键无效: " cfg.startHotkey)
+    _RebindAllHotkeys() {
+        this._UnbindHotkeys()
+        used := Map()
+        for m in this.store.macros {
+            mid := m.id
+            this._TryBind(m.startHotkey, used, (*) => this.StartMacro(mid))
+            this._TryBind(m.stopHotkey, used, (*) => this.StopMacro(mid))
+            this._TryBind(m.pauseHotkey, used, (*) => this.TogglePauseMacro(mid))
+        }
+    }
+
+    _TryBind(hk, used, fn) {
+        hk := Trim(hk)
+        if (hk = "")
+            return
+        key := StrLower(hk)
+        if used.Has(key) {
+            ; 多套配置热键冲突时，后写的不覆盖先绑定的
+            return
         }
         try {
-            Hotkey(cfg.stopHotkey, (*) => this.Stop(), "On")
-            this._boundHotkeys.Push(cfg.stopHotkey)
-        }
-        try {
-            Hotkey(cfg.pauseHotkey, (*) => this.TogglePause(), "On")
-            this._boundHotkeys.Push(cfg.pauseHotkey)
+            Hotkey(hk, fn, "On")
+            this._boundHotkeys.Push(hk)
+            used[key] := true
         }
     }
 
@@ -761,34 +913,75 @@ class AutoKeyApp {
     }
 
     Start() {
-        if (this.seq && this.seq.IsRunning) {
-            this._SetStatus("已在运行")
-            return
-        }
-        ; 每次开始都以界面上的当前内容为准，避免改了目标窗口却忘了「保存并应用」
-        if !this._ApplyFromUi(false)
-            return
-        this.seq.Start()
+        this.StartMacro(this.store.activeId)
     }
 
     Stop() {
-        if this.seq
-            this.seq.Stop()
+        this.StopMacro(this.store.activeId)
     }
 
     TogglePause() {
-        if this.seq
-            this.seq.TogglePause()
+        this.TogglePauseMacro(this.store.activeId)
+    }
+
+    StartMacro(id) {
+        ; 若开始的是当前编辑项，先把界面同步进去
+        if (id = this.store.activeId) {
+            if this._IsRunnerActive(id) {
+                this._SetStatus("已在运行: " this.store.Active().name)
+                return
+            }
+            if !this._ApplyFromUi(false)
+                return
+        } else if this._IsRunnerActive(id) {
+            return
+        } else {
+            m := this.store.GetById(id)
+            if !m
+                return
+            this.target := WindowTarget(m)
+            seq := Sequencer(m, this.target)
+            seq.onStatus := (t) => this._OnRunnerStatus(id, t)
+            this.runners[id] := seq
+        }
+
+        if !this.runners.Has(id) {
+            this._SyncActiveRefs(true)
+        }
+        this.runners[id].Start()
+        this._ReloadMacroList(this.store.activeId)
+        this._RefreshStatusBar()
+    }
+
+    StopMacro(id) {
+        if this.runners.Has(id)
+            this.runners[id].Stop()
+        this._ReloadMacroList(this.store.activeId)
+        this._RefreshStatusBar()
+    }
+
+    StopAll() {
+        for id, seq in this.runners
+            seq.Stop()
+        this._ReloadMacroList(this.store.activeId)
+        this._SetStatus("已全部停止")
+    }
+
+    TogglePauseMacro(id) {
+        if this.runners.Has(id)
+            this.runners[id].TogglePause()
+        this._RefreshStatusBar()
     }
 
     _OnClose() {
-        try this._ApplyFromUi(false)
+        ; 关闭窗口不打断正在跑的任务，只隐藏
         this.gui.Hide()
     }
 
     _Quit() {
+        this.StopAll()
         try {
-            if !(this.seq && this.seq.IsRunning)
+            if !this._IsRunnerActive(this.store.activeId)
                 this._ApplyFromUi(false)
         }
         ExitApp()

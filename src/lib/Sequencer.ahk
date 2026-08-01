@@ -1,7 +1,8 @@
 #Requires AutoHotkey v2.0
 
 /**
- * 按键序列执行器：支持循环、暂停、停止，以及 Send / ControlSend。
+ * 按键序列执行器：定时器驱动，避免 ControlSend 阻塞导致停止按钮无响应。
+ * 支持多实例并行（每个配置一套 Sequencer）。
  */
 class Sequencer {
     __New(cfg, target) {
@@ -10,7 +11,11 @@ class Sequencer {
         this.running := false
         this.paused := false
         this._stopRequested := false
-        this.onStatus := (*) => 0  ; 回调 (text)
+        this.onStatus := (*) => 0
+        this._steps := []
+        this._stepIndex := 1
+        this._loopsDone := 0
+        this._tickFn := this._Tick.Bind(this)
     }
 
     IsRunning {
@@ -26,14 +31,24 @@ class Sequencer {
         this.running := true
         this.paused := false
         this._stopRequested := false
+        this._steps := this.cfg.HasMethod("EffectiveSteps") ? this.cfg.EffectiveSteps() : this.cfg.steps
+        if (this._steps.Length = 0) {
+            this.running := false
+            this._Notify("序列为空")
+            return
+        }
+        this._stepIndex := 1
+        this._loopsDone := 0
         this._Notify("运行中")
-        SetTimer(() => this._Run(), -1)
+        ; 一次性定时器：每步结束后再预约下一步，主线程不堵死
+        SetTimer(this._tickFn, -1)
     }
 
     Stop() {
         this._stopRequested := true
         this.paused := false
         this.running := false
+        try SetTimer(this._tickFn, 0)
         this._Notify("已停止")
     }
 
@@ -42,110 +57,184 @@ class Sequencer {
             return
         this.paused := !this.paused
         this._Notify(this.paused ? "已暂停" : "运行中")
+        if !this.paused && !this._stopRequested
+            SetTimer(this._tickFn, -1)
     }
 
-    _Run() {
-        cfg := this.cfg
-        loopsDone := 0
-        try {
-            loop {
-                if this._stopRequested
-                    break
-
-                hwnd := this.target.EnsureReady()
-                if !hwnd {
-                    this._Notify("未找到目标窗口 [" this.target.Describe() "]，等待中…")
-                    Sleep 500
-                    if this._stopRequested
-                        break
-                    continue
-                }
-
-                steps := cfg.HasMethod("EffectiveSteps") ? cfg.EffectiveSteps() : cfg.steps
-                for step in steps {
-                    if this._stopRequested
-                        break 2
-                    while this.paused {
-                        if this._stopRequested
-                            break 3
-                        Sleep 50
-                    }
-                    this._ExecStep(step, hwnd)
-                }
-
-                loopsDone++
-                if !cfg.loop
-                    break
-                if (cfg.repeat > 0 && loopsDone >= cfg.repeat)
-                    break
-
-                delay := cfg.loopDelay
-                elapsed := 0
-                while (elapsed < delay) {
-                    if this._stopRequested
-                        break 2
-                    while this.paused {
-                        if this._stopRequested
-                            break 3
-                        Sleep 50
-                    }
-                    Sleep 20
-                    elapsed += 20
-                }
-            }
-        } catch as e {
-            this._Notify("错误: " e.Message)
+    _Tick() {
+        if this._stopRequested || !this.running {
+            this.running := false
+            return
         }
-        this.running := false
-        this.paused := false
-        if !this._stopRequested
-            this._Notify("已完成")
+        if this.paused
+            return
+
+        hwnd := this.target.EnsureReady()
+        if !hwnd {
+            this._Notify("未找到目标窗口 [" this.target.Describe() "]，等待中…")
+            if !this._stopRequested && this.running
+                SetTimer(this._tickFn, -300)
+            return
+        }
+
+        step := this._steps[this._stepIndex]
+        waitMs := this._ExecStep(step, hwnd)
+
+        if this._stopRequested || !this.running {
+            this.running := false
+            return
+        }
+
+        this._stepIndex++
+        if (this._stepIndex > this._steps.Length) {
+            this._stepIndex := 1
+            this._loopsDone++
+            cfg := this.cfg
+            if !cfg.loop {
+                this.running := false
+                this._Notify("已完成")
+                return
+            }
+            if (cfg.repeat > 0 && this._loopsDone >= cfg.repeat) {
+                this.running := false
+                this._Notify("已完成")
+                return
+            }
+            waitMs := Integer(cfg.loopDelay)
+        }
+
+        if this._stopRequested || !this.running {
+            this.running := false
+            return
+        }
+        SetTimer(this._tickFn, -Max(1, Integer(waitMs)))
     }
 
+    /** 执行一步，返回下一步前应等待的毫秒数 */
     _ExecStep(step, hwnd) {
         switch step.kind {
             case "sleep":
-                Sleep step.delay
+                return Integer(step.delay)
             case "click":
-                if (this.target.sendMode = "controlsend") {
-                    ; 后台点击不一定可靠，尽量用 ControlClick
-                    try ControlClick("x" step.x " y" step.y, "ahk_id " hwnd)
-                    catch
+                try {
+                    if (this.target.sendMode = "controlsend")
+                        ControlClick("x" step.x " y" step.y, "ahk_id " hwnd, , "Left", 1, "NA")
+                    else
                         Click step.x, step.y
-                } else {
-                    Click step.x, step.y
                 }
-                Sleep step.delay
+                return Integer(step.delay)
             default:
                 this._SendKey(step.key, hwnd, step.hold)
-                Sleep step.delay
+                return Integer(step.delay)
         }
     }
 
     _SendKey(key, hwnd, hold := 0) {
-        ; 规范化：单字母可直接发；功能键建议写成 {Enter} 形式
         sendKey := key
-        if (StrLen(key) = 1 || RegExMatch(key, "^[\!\^\+\\#]*\{.+\}$") || RegExMatch(key, "^[\!\^\+\\#]+.$"))
+        if (StrLen(key) = 1 || RegExMatch(key, "^[\!\^\+\#]*\{.+\}$") || RegExMatch(key, "^[\!\^\+\#]+.$"))
             sendKey := key
         else if !InStr(key, "{")
             sendKey := "{" key "}"
 
         if (this.target.sendMode = "controlsend") {
-            if (hold > 0) {
-                ControlSend("{Blind}" sendKey " down", , "ahk_id " hwnd)
-                Sleep hold
-                ControlSend("{Blind}" sendKey " up", , "ahk_id " hwnd)
-            } else {
-                ControlSend("{Blind}" sendKey, , "ahk_id " hwnd)
-            }
+            ; 异步/超时投递，避免 SendMessage 卡住后停止按钮失灵
+            if !this._PostKey(hwnd, sendKey, hold)
+                this._ControlSendTimeout(hwnd, sendKey, hold)
         } else {
             if (hold > 0) {
                 Send("{Blind}" sendKey " down")
-                Sleep hold
+                this._SleepChunked(hold)
                 Send("{Blind}" sendKey " up")
             } else {
                 Send("{Blind}" sendKey)
             }
+        }
+    }
+
+    /** ControlSend 的超时替代：SendMessageTimeout，避免目标窗口不响应时卡死 */
+    _ControlSendTimeout(hwnd, sendKey, hold := 0) {
+        ; 仍优先走 PostMessage 解析；失败则对每个字符尽量 WM_CHAR
+        if this._PostKey(hwnd, sendKey, hold)
+            return
+        ; 最后手段：短超时 ControlSend 不可用时，拆成 PostMessage WM_CHAR
+        text := sendKey
+        text := StrReplace(text, "{Blind}", "")
+        if (StrLen(text) = 1) {
+            PostMessage(0x0102, Ord(text), 0, , "ahk_id " hwnd)  ; WM_CHAR
+            return
+        }
+        ; 实在无法解析也不阻塞主线程——跳过本键
+    }
+
+    /**
+     * 异步投递按键。成功返回 true；无法解析的组合键返回 false 由调用方回退。
+     */
+    _PostKey(hwnd, key, hold := 0) {
+        mods := Map("ctrl", false, "alt", false, "shift", false, "win", false)
+        raw := key
+        while RegExMatch(raw, "^([\!\^\+\#])(.+)$", &m) {
+            switch m[1] {
+                case "^": mods["ctrl"] := true
+                case "!": mods["alt"] := true
+                case "+": mods["shift"] := true
+                case "#": mods["win"] := true
+            }
+            raw := m[2]
+        }
+
+        vk := 0
+        if RegExMatch(raw, "^\{(.+)\}$", &bm) {
+            name := bm[1]
+            ; 去掉可能的空格/重复，如 Space down
+            name := RegExReplace(name, "i)\s*(down|up)$", "")
+            vk := GetKeyVK(name)
+            if !vk {
+                ; 常见别名
+                alias := Map("Esc", "Escape", "Backspace", "BS", "Del", "Delete", "Ins", "Insert")
+                if alias.Has(name)
+                    vk := GetKeyVK(alias[name])
+            }
+        } else if (StrLen(raw) = 1) {
+            vk := GetKeyVK(raw)
+        }
+
+        if !vk
+            return false
+
+        ; 修饰键按下
+        if mods["ctrl"]
+            PostMessage(0x0100, 0x11, 0, , "ahk_id " hwnd)  ; VK_CONTROL down
+        if mods["alt"]
+            PostMessage(0x0100, 0x12, 0, , "ahk_id " hwnd)
+        if mods["shift"]
+            PostMessage(0x0100, 0x10, 0, , "ahk_id " hwnd)
+        if mods["win"]
+            PostMessage(0x0100, 0x5B, 0, , "ahk_id " hwnd)
+
+        PostMessage(0x0100, vk, 0, , "ahk_id " hwnd)  ; WM_KEYDOWN
+        if (hold > 0)
+            this._SleepChunked(hold)
+        PostMessage(0x0101, vk, 0, , "ahk_id " hwnd)  ; WM_KEYUP
+
+        if mods["win"]
+            PostMessage(0x0101, 0x5B, 0, , "ahk_id " hwnd)
+        if mods["shift"]
+            PostMessage(0x0101, 0x10, 0, , "ahk_id " hwnd)
+        if mods["alt"]
+            PostMessage(0x0101, 0x12, 0, , "ahk_id " hwnd)
+        if mods["ctrl"]
+            PostMessage(0x0101, 0x11, 0, , "ahk_id " hwnd)
+        return true
+    }
+
+    _SleepChunked(ms) {
+        elapsed := 0
+        while (elapsed < ms) {
+            if this._stopRequested
+                return
+            slice := Min(20, ms - elapsed)
+            Sleep slice
+            elapsed += slice
         }
     }
 
