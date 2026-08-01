@@ -237,8 +237,9 @@ class Sequencer {
 
     /** GetKeyVK 遇到无效键名会抛异常，这里统一吞掉返回 0 */
     _Vk(name) {
-        try return GetKeyVK(name)
-        return 0
+        vk := 0
+        try vk := GetKeyVK(name)
+        return vk
     }
 
     _SleepChunked(ms) {

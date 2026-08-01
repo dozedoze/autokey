@@ -23,12 +23,21 @@ global gApp := AutoKeyApp()
 AutoKeyOnError(err, mode) {
     msg := "[" A_Now "] "
     try {
-        msg .= (IsObject(err) && err.HasProp("Message")) ? err.Message : String(err)
         if IsObject(err) {
-            for prop in ["What", "Extra", "File", "Line", "Stack"] {
-                if (err.HasProp(prop) && err.%prop% != "")
-                    msg .= "`n  " prop ": " err.%prop%
-            }
+            if err.HasProp("Message")
+                msg .= err.Message
+            if err.HasProp("What")
+                msg .= "`n  what: " err.What
+            if err.HasProp("Extra")
+                msg .= "`n  extra: " err.Extra
+            if err.HasProp("File")
+                msg .= "`n  file: " err.File
+            if err.HasProp("Line")
+                msg .= "`n  line: " err.Line
+            if err.HasProp("Stack")
+                msg .= "`n  stack: " err.Stack
+        } else {
+            msg .= err
         }
     }
     try FileAppend(msg "`n`n", RegExReplace(gApp.store.path, "[^\\]+$", "") "error.log", "UTF-8")
@@ -205,39 +214,38 @@ class AutoKeyApp {
         ; Delete 与 Add 之间若被运行中的定时器线程打断并重入，列表会被重复填充，
         ; 之后点击靠后的重复项就会索引越界，所以整段必须不可中断。
         prevCritical := A_IsCritical
-        Critical "On"
         prevLoading := this._loadingUi
+        Critical "On"
         this._loadingUi := true
-        try {
-            names := []
-            mark := ""
-            choose := 1
-            want := selectId != "" ? selectId : this.store.activeId
-            for i, m in this.store.macros {
-                label := m.name
-                running := this._IsRunnerActive(m.id)
-                mark .= running ? "1" : "0"
-                if running
-                    label := "▶ " label
-                ; 同 exe 多套时在列表里带上标题，方便区分
-                if (m.targetExe != "" && this._CountExe(m.targetExe) > 1) {
-                    tip := m.targetTitle != "" ? m.targetTitle : m.targetExe
-                    label .= "  [" tip "]"
-                }
-                names.Push(label)
-                if (m.id = want)
-                    choose := i
+
+        names := []
+        mark := ""
+        choose := 1
+        want := selectId != "" ? selectId : this.store.activeId
+        for i, m in this.store.macros {
+            label := m.name
+            running := this._IsRunnerActive(m.id)
+            mark .= running ? "1" : "0"
+            if running
+                label := "▶ " label
+            ; 同 exe 多套时在列表里带上标题，方便区分
+            if (m.targetExe != "" && this._CountExe(m.targetExe) > 1) {
+                tip := m.targetTitle != "" ? m.targetTitle : m.targetExe
+                label .= "  [" tip "]"
             }
-            this.lbMacros.Delete()
-            if (names.Length) {
-                this.lbMacros.Add(names)
-                this.lbMacros.Choose(choose)
-            }
-            this._runMark := mark
-        } finally {
-            this._loadingUi := prevLoading
-            Critical(prevCritical)
+            names.Push(label)
+            if (m.id = want)
+                choose := i
         }
+        this.lbMacros.Delete()
+        if (names.Length) {
+            this.lbMacros.Add(names)
+            this.lbMacros.Choose(choose)
+        }
+        this._runMark := mark
+
+        this._loadingUi := prevLoading
+        Critical prevCritical
     }
 
     /** 运行标记有变化时才重建列表，避免定时器高频刷新和用户点击抢控件 */

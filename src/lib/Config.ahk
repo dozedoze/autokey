@@ -360,10 +360,11 @@ class MacroStore {
             return false
         this.activeId := id
         ; 切换配置很频繁，只改一个键，不整体重写 ini
-        if FileExist(this.path)
+        if FileExist(this.path) {
             try IniWrite(id, this.path, "App", "ActiveId")
-        else
+        } else {
             this.Save()
+        }
         return true
     }
 
@@ -380,11 +381,8 @@ class MacroStore {
         ; 写盘期间不允许被定时器线程重入，否则会写出半截 ini
         prevCritical := A_IsCritical
         Critical "On"
-        try {
-            this._Save()
-        } finally {
-            Critical(prevCritical)
-        }
+        this._Save()
+        Critical prevCritical
     }
 
     _Save() {
