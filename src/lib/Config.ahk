@@ -257,6 +257,7 @@ class MacroConfig {
  */
 class MacroStore {
     __New() {
+        this.dataDirCache := ""
         this.path := this._DataPath()
         this.macros := []      ; MacroConfig[]
         this.activeId := ""
@@ -268,14 +269,14 @@ class MacroStore {
     }
 
     _DataDir() {
-        if this.HasProp("_dataDir")
-            return this._dataDir
+        if (this.dataDirCache != "")
+            return this.dataDirCache
 
         ; 优先用 exe/脚本同级目录，便携；不可写时退回用户目录
         candidates := [A_ScriptDir "\data", A_ScriptDir "\..\data"]
         for d in candidates {
             if (DirExist(d) && this._IsWritable(d)) {
-                this._dataDir := d
+                this.dataDirCache := d
                 return d
             }
         }
@@ -283,7 +284,7 @@ class MacroStore {
             try {
                 DirCreate(d)
                 if this._IsWritable(d) {
-                    this._dataDir := d
+                    this.dataDirCache := d
                     return d
                 }
             }
@@ -291,7 +292,7 @@ class MacroStore {
 
         fallback := A_AppData "\AutoKey"
         try DirCreate(fallback)
-        this._dataDir := fallback
+        this.dataDirCache := fallback
         return fallback
     }
 
