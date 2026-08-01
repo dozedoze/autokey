@@ -61,7 +61,8 @@ class Sequencer {
                     continue
                 }
 
-                for step in cfg.steps {
+                steps := cfg.HasMethod("EffectiveSteps") ? cfg.EffectiveSteps() : cfg.steps
+                for step in steps {
                     if this._stopRequested
                         break 2
                     while this.paused {

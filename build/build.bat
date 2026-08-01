@@ -27,7 +27,8 @@ echo [AutoKey] 工作目录: %ROOT%
 if not exist "%SRC%" goto :NoSrc
 
 echo [AutoKey] 创建输出目录...
-if not exist "%OUT_DIR%\configs" mkdir "%OUT_DIR%\configs"
+if not exist "%OUT_DIR%" mkdir "%OUT_DIR%"
+if not exist "%OUT_DIR%\data" mkdir "%OUT_DIR%\data"
 if not exist "%TOOLS_DIR%\Compiler" mkdir "%TOOLS_DIR%\Compiler"
 if not exist "%OUT_DIR%" goto :NoOutDir
 
@@ -59,13 +60,18 @@ if not exist "%OUT_EXE%" (
 )
 if not exist "%OUT_EXE%" goto :CompileFail
 
-if exist "%ROOT%\configs\*.ini" xcopy /Y /Q "%ROOT%\configs\*.ini" "%OUT_DIR%\configs\" >nul
+if exist "%OUT_DIR%\configs" rmdir /s /q "%OUT_DIR%\configs" >nul 2>nul
+if exist "%ROOT%\configs\*.ini" (
+  mkdir "%OUT_DIR%\configs" >nul 2>nul
+  xcopy /Y /Q "%ROOT%\configs\*.ini" "%OUT_DIR%\configs\" >nul
+)
 
 echo.
 echo [完成] 输出: %OUT_EXE%
 for %%A in ("%OUT_EXE%") do echo [体积] %%~zA bytes
 echo.
 echo 把整个 dist 文件夹拷到 Windows 任意位置即可运行。
+echo 首次运行会在同目录生成 data\ 保存界面配置。
 echo.
 pause
 exit /b 0

@@ -1,5 +1,6 @@
 tools/ahk/
 dist/
+data/
 *.exe
 .DS_Store
 Thumbs.db

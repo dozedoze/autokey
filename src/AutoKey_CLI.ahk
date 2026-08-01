@@ -1,7 +1,7 @@
 #Requires AutoHotkey v2.0
 #SingleInstance Force
-; 无 GUI 轻量入口：AutoKey_CLI.ahk configs\xxx.ini
-; 适合只想热键启停、不需要界面的场景；打包体积与主程序接近
+; 无 GUI 轻量入口：AutoKey_CLI.ahk <config.ini>
+; 适合只想热键启停、不需要界面的场景
 
 #Include lib\Config.ahk
 #Include lib\Target.ahk
@@ -14,7 +14,7 @@ if (A_Args.Length < 1) {
 
 try {
     path := MacroConfig.ResolvePath(A_Args[1])
-    cfg := MacroConfig(path)
+    cfg := MacroConfig.FromIniFile(path)
 } catch as e {
     MsgBox "加载失败:`n" e.Message, "AutoKey CLI", "Icon!"
     ExitApp

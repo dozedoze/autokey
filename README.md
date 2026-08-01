@@ -1,72 +1,51 @@
 # AutoKey — 类按键精灵的按键编排工具（AutoHotkey v2）
 
 在 Windows 上自动按键、编排按键序列，并可指定目标应用程序。  
-本仓库在 macOS 上只负责编写脚本；**最终产物是 Windows 绿色版 exe**（约 1–2 MB）。
+**全部在图形界面里配置**，无需手改配置文件。
 
-> 你提到的「autokey v2」对应的是 **[AutoHotkey v2](https://www.autohotkey.com/v2/)**——Windows 上最接近「按键精灵」的方案，体积小、可编译成独立 exe。
+本仓库在 macOS 上只负责编写脚本；**最终产物是 Windows 绿色版 exe**（约 1–2 MB）。
 
 ## 功能
 
-- 单键连发 / 多步按键序列编排
+- **连发模式**（默认）：可动态添加多个键位，按列表顺序轮流连发；每个键可单独设间隔
+- **按键序列**：多步顺序编排（按键 / 等待 / 点击）
+- **多套配置**：左侧新建、切换、删除多套方案
 - 按进程名（`exe`）、窗口标题、窗口类定位目标程序
-- 开始 / 停止 / 暂停热键
+- 开始 / 停止 / 暂停热键（支持界面内「捕捉」）
 - 循环次数与间隔可配
-- `Send`（前台，兼容性最好）或 `ControlSend`（尽量后台）
-- INI 配置，改完即用，无需改代码
+- `Send`（前台）或 `ControlSend`（尽量后台）
+- 配置自动保存到 `data\`，关闭再开仍在
+- 可导入旧版 `configs\*.ini`（兼容）
 - 打包为绿色 `dist\` 目录，拷走就能跑
+
+## 界面怎么用
+
+1. 左侧选择或「新建」一套配置
+2. 选模式：
+   - **连发模式**：填按键（或「捕捉」直接加入）+ 间隔，可继续加入更多键位；上移/下移调顺序
+   - **按键序列**：在列表里添加 / 编辑 / 排序步骤（可含等待、点击）
+3. 按需设循环、热键、目标窗口（「取前台」可自动填入当前窗口）
+4. 点 **保存并应用**，再点 **开始**（或按开始热键，默认 F6）
+
+常用按键写法：`a`、`{Enter}`、`{Space}`、`{Tab}`、`{Esc}`、`{F1}`、`^c`（Ctrl+C）、`!{F4}`（Alt+F4）。
 
 ## 目录结构
 
 ```
 autokey/
 ├── src/
-│   ├── AutoKey.ahk          # 主程序（GUI + 托盘）
+│   ├── AutoKey.ahk          # 主程序（可视化配置 GUI）
 │   └── lib/
-│       ├── Config.ahk       # INI 配置加载
+│       ├── Config.ahk       # 多套配置 + 自动持久化
 │       ├── Target.ahk       # 目标窗口定位
 │       └── Sequencer.ahk    # 序列执行器
-├── configs/                 # 宏配置（可自行添加）
-│   ├── example.ini          # 记事本输入 hello
-│   ├── spam_space.ini       # 空格连发
-│   └── combo_demo.ini       # 组合序列
+├── configs/                 # 旧版 ini 示例（可「导入旧 ini」）
+├── data/                    # 运行时自动生成，保存你的 UI 配置
 ├── build/build.bat          # Windows 一键编译
 ├── tools/ahk/               # 自动下载的 AHK 便携版（gitignore）
 ├── dist/                    # 编译输出（gitignore）
 └── .github/workflows/       # 在 GitHub 上自动打 Windows 包
 ```
-
-## 配置说明（`configs/*.ini`）
-
-```ini
-[Macro]
-Name=我的宏
-Loop=1              ; 1=循环 0=单次
-LoopDelay=200       ; 每轮结束后的间隔（毫秒）
-Repeat=0            ; 循环轮数，0=无限
-
-[Hotkeys]
-Start=F6
-Stop=F7
-Pause=F8
-
-[Target]
-Exe=notepad.exe     ; 目标进程名（推荐），留空则打当前前台窗口
-Title=              ; 标题包含匹配，可留空
-Class=              ; 窗口类名，可留空
-Activate=1          ; 发送前是否激活窗口
-SendMode=Send       ; Send | ControlSend
-
-[Sequence]
-; 序号=按键|延迟ms
-; 序号=按键|延迟ms|按住ms
-; 序号=sleep|毫秒
-; 序号=click|屏幕X|屏幕Y|延迟ms
-1=a|100
-2={Enter}|200
-3=sleep|500
-```
-
-常用按键写法：`a`、`{Enter}`、`{Space}`、`{Tab}`、`{Esc}`、`{F1}`、`^c`（Ctrl+C）、`!{F4}`（Alt+F4）、`+a`（Shift+A）。
 
 ## 在 Windows 上使用
 
@@ -74,7 +53,7 @@ SendMode=Send       ; Send | ControlSend
 
 1. 安装 [AutoHotkey v2](https://www.autohotkey.com/v2/)
 2. 双击 `src\AutoKey.ahk`
-3. 选择 `configs` 里的 ini → 加载 → 开目标程序 → 按开始热键（默认 F6）
+3. 在界面里配置 → 保存并应用 → 开目标程序 → 开始
 
 ### 方式 B：打成绿色 exe（推荐分发）
 
@@ -84,84 +63,40 @@ SendMode=Send       ; Send | ControlSend
 build\build.bat
 ```
 
-首次运行会自动把 AutoHotkey v2 和 Ahk2Exe 编译器的**便携版**下载解压到 `tools\ahk\`，
-不安装系统组件、不需要管理员权限，之后再运行就直接复用。
-GitHub 直连失败时会自动切换镜像重试。
-
-完成后得到：
-
-```
-dist/
-  AutoKey.exe
-  configs\*.ini
-```
-
-把整个 `dist` 拷到任意 Windows 机器即可，无需再装 AutoHotkey。  
-开启 UPX 时体积通常约 **1MB 出头**；若本机无 UPX 会自动退回无压缩（约 1.5–2MB）。
+首次运行会自动把 AutoHotkey v2 和 Ahk2Exe 编译器的**便携版**下载解压到 `tools\ahk\`。  
+完成后得到 `dist\AutoKey.exe`，拷到任意 Windows 机器即可。
 
 #### 双击后没有生成 dist 怎么办
 
-脚本执行到任何一步失败都会打印原因并 `pause`，窗口不会自动关闭，先看窗口里的提示。若窗口仍然一闪而过，说明 bat 在第一行就无法解析，按顺序排查：
-
-1. **必须下载整个仓库**，不能只单独下载 `build.bat`。它依赖同级的 `..\src\AutoKey.ahk`。
-2. **确认行尾是 CRLF**。若在 macOS/Linux 上编辑或用非 Git 方式传输过 `build.bat`，可能变成 LF 行尾，`cmd.exe` 会直接语法错误退出。在 Windows 上用 PowerShell 检查并修复：
+1. **必须下载整个仓库**，不能只单独下载 `build.bat`
+2. **确认行尾是 CRLF**（仓库已用 `.gitattributes` 处理；若仍有问题见下方 PowerShell 修复）
+3. **不要在压缩包里直接双击**，先解压到可写目录
 
 ```powershell
-# 检查：输出 True 表示行尾正常
-(Get-Content -Raw build\build.bat) -match "`r`n"
-
-# 修复
 $p = "build\build.bat"
 (Get-Content -Raw $p) -replace "`r?`n", "`r`n" | Set-Content -NoNewline $p
 ```
 
-3. **不要在压缩包里直接双击**，先解压到桌面等可写目录。
-4. 想看完整报错，可在该目录打开 `cmd`，手动执行 `build\build.bat`。
-
 #### 提示「找不到 Ahk2Exe.exe」
 
-AutoHotkey v2 的安装包本身**不包含** Ahk2Exe 编译器，它是独立发布的组件，
-所以「已经装了 AutoHotkey」并不代表能编译。脚本会自动下载它；若下载失败，手动补上即可：
-
-1. 到 [Ahk2Exe releases](https://github.com/AutoHotkey/Ahk2Exe/releases) 下载最新的 zip
-2. 解压到仓库的 `tools\ahk\Compiler\`，确保存在 `tools\ahk\Compiler\Ahk2Exe.exe`
-3. 重新运行 `build\build.bat`
-
-同理，若提示找不到 `AutoHotkey64.exe`，从
-[AutoHotkey releases](https://github.com/AutoHotkey/AutoHotkey/releases) 下载
-`AutoHotkey_2.0.19.zip` 解压到 `tools\ahk\` 即可。
-
-实在下载不动，就走下面的方式 C，让 GitHub Actions 帮你编译。
-
-仓库已用 `.gitattributes` 把 `*.bat` 标记为 `-text`，正常 `git clone` / Download ZIP 得到的都是 CRLF。
+到 [Ahk2Exe releases](https://github.com/AutoHotkey/Ahk2Exe/releases) 下载 zip，解压到 `tools\ahk\Compiler\`，确保存在 `Ahk2Exe.exe` 后重跑 `build.bat`。
 
 ### 方式 C：在 Mac 上开发，用 GitHub Actions 打包
 
-1. 把仓库推到 GitHub
-2. 打开 Actions → **Build Windows EXE** → 下载 `AutoKey-windows` 产物
+1. 把仓库推到 GitHub  
+2. Actions → **Build Windows EXE** → 下载 `AutoKey-windows`  
 3. 解压后在 Windows 上运行 `AutoKey.exe`
-
-本地也可手动触发：`workflow_dispatch`。
-
-## 体积为什么能很小？
-
-| 方案 | 大约体积 | 说明 |
-|------|----------|------|
-| **AutoHotkey 编译 exe** | ~1–2 MB | 本项目采用 |
-| Python + PyInstaller | 20–40 MB+ | 偏大 |
-| Electron / .NET 整包 | 更大 | 不适合这种工具 |
-
-AHK 本身就是为 Windows 键鼠自动化设计的，编译后几乎是「脚本 + 精简运行时」。
 
 ## 注意
 
 - 仅支持 **Windows**（Win7+，建议 Win10/11）
-- 部分游戏使用反作弊 / DirectInput，普通 `Send` 可能无效；可尝试管理员运行，或改用驱动级方案（超出本项目范围）
+- 部分游戏使用反作弊 / DirectInput，普通 `Send` 可能无效
 - `ControlSend` 后台发送对很多程序无效，默认用 `Send` 更稳
-- 请遵守目标软件/游戏的使用条款，勿用于破坏公平或违规场景
+- 请遵守目标软件/游戏的使用条款
 
 ## 快速验证
 
 1. 打开 Windows 记事本  
-2. 加载 `configs\example.ini`  
-3. 按 `F6`，应循环输入 `hello` 并回车；`F7` 停止
+2. 连发模式：加入 `h`，间隔 `80`；或再加入更多键位轮流连发  
+3. 目标 exe 填 `notepad.exe`（或「取前台」）  
+4. 保存并应用 → F6 开始 / F7 停止
