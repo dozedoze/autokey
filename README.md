@@ -98,6 +98,7 @@ $p = "build\build.bat"
 - 部分游戏使用反作弊 / DirectInput，普通 `Send` 可能无效
 - `ControlSend` 后台发送对很多程序无效，默认用 `Send` 更稳
 - 请遵守目标软件/游戏的使用条款
+- 运行中若出现报错，详情会写到配置目录下的 `error.log`（与 `macros.ini` 同一目录），反馈问题时带上这段内容即可定位
 
 ## 快速验证
 

@@ -77,8 +77,16 @@ class Sequencer {
             return
         }
 
+        if (this._stepIndex > this._steps.Length)
+            this._stepIndex := 1
         step := this._steps[this._stepIndex]
-        waitMs := this._ExecStep(step, hwnd)
+        try {
+            waitMs := this._ExecStep(step, hwnd)
+        } catch as e {
+            ; 目标窗口可能刚被关闭：定时器线程里不能抛未捕获异常，等下一轮重找
+            this._Notify("发送失败(" e.Message ")，重试中…")
+            waitMs := 300
+        }
 
         if this._stopRequested || !this.running {
             this.running := false
@@ -187,15 +195,15 @@ class Sequencer {
             name := bm[1]
             ; 去掉可能的空格/重复，如 Space down
             name := RegExReplace(name, "i)\s*(down|up)$", "")
-            vk := GetKeyVK(name)
+            vk := this._Vk(name)
             if !vk {
                 ; 常见别名
                 alias := Map("Esc", "Escape", "Backspace", "BS", "Del", "Delete", "Ins", "Insert")
                 if alias.Has(name)
-                    vk := GetKeyVK(alias[name])
+                    vk := this._Vk(alias[name])
             }
         } else if (StrLen(raw) = 1) {
-            vk := GetKeyVK(raw)
+            vk := this._Vk(raw)
         }
 
         if !vk
@@ -225,6 +233,12 @@ class Sequencer {
         if mods["ctrl"]
             PostMessage(0x0101, 0x11, 0, , "ahk_id " hwnd)
         return true
+    }
+
+    /** GetKeyVK 遇到无效键名会抛异常，这里统一吞掉返回 0 */
+    _Vk(name) {
+        try return GetKeyVK(name)
+        return 0
     }
 
     _SleepChunked(ms) {

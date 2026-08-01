@@ -359,7 +359,11 @@ class MacroStore {
         if !this.GetById(id)
             return false
         this.activeId := id
-        this.Save()
+        ; 切换配置很频繁，只改一个键，不整体重写 ini
+        if FileExist(this.path)
+            try IniWrite(id, this.path, "App", "ActiveId")
+        else
+            this.Save()
         return true
     }
 
@@ -373,6 +377,17 @@ class MacroStore {
     }
 
     Save() {
+        ; 写盘期间不允许被定时器线程重入，否则会写出半截 ini
+        prevCritical := A_IsCritical
+        Critical "On"
+        try {
+            this._Save()
+        } finally {
+            Critical(prevCritical)
+        }
+    }
+
+    _Save() {
         path := this.path
         dir := this._DataDir()
         if !DirExist(dir)

@@ -15,7 +15,26 @@ CoordMode "Mouse", "Screen"
 #Include lib\Target.ahk
 #Include lib\Sequencer.ahk
 
+OnError(AutoKeyOnError)
+
 global gApp := AutoKeyApp()
+
+/** 把未捕获异常写进 data\error.log，方便定位；只结束出错的线程，不退出程序 */
+AutoKeyOnError(err, mode) {
+    msg := "[" A_Now "] "
+    try {
+        msg .= (IsObject(err) && err.HasProp("Message")) ? err.Message : String(err)
+        if IsObject(err) {
+            for prop in ["What", "Extra", "File", "Line", "Stack"] {
+                if (err.HasProp(prop) && err.%prop% != "")
+                    msg .= "`n  " prop ": " err.%prop%
+            }
+        }
+    }
+    try FileAppend(msg "`n`n", RegExReplace(gApp.store.path, "[^\\]+$", "") "error.log", "UTF-8")
+    try MsgBox("出错了（详情已写入 data\error.log）：`n`n" msg, "AutoKey", "Icon!")
+    return 1
+}
 
 class AutoKeyApp {
     __New() {
@@ -27,6 +46,7 @@ class AutoKeyApp {
         this._boundHotkeys := []
         this._loadingUi := false
         this._capturing := false
+        this._runMark := ""
 
         this._InitTray()
         this._BuildGui()
@@ -182,29 +202,51 @@ class AutoKeyApp {
     ; ───────── 列表 / 切换 ─────────
 
     _ReloadMacroList(selectId := "") {
+        ; Delete 与 Add 之间若被运行中的定时器线程打断并重入，列表会被重复填充，
+        ; 之后点击靠后的重复项就会索引越界，所以整段必须不可中断。
+        prevCritical := A_IsCritical
+        Critical "On"
+        prevLoading := this._loadingUi
         this._loadingUi := true
-        this.lbMacros.Delete()
-        names := []
-        choose := 1
-        want := selectId != "" ? selectId : this.store.activeId
-        for i, m in this.store.macros {
-            label := m.name
-            if this._IsRunnerActive(m.id)
-                label := "▶ " label
-            ; 同 exe 多套时在列表里带上标题，方便区分
-            if (m.targetExe != "" && this._CountExe(m.targetExe) > 1) {
-                tip := m.targetTitle != "" ? m.targetTitle : m.targetExe
-                label .= "  [" tip "]"
+        try {
+            names := []
+            mark := ""
+            choose := 1
+            want := selectId != "" ? selectId : this.store.activeId
+            for i, m in this.store.macros {
+                label := m.name
+                running := this._IsRunnerActive(m.id)
+                mark .= running ? "1" : "0"
+                if running
+                    label := "▶ " label
+                ; 同 exe 多套时在列表里带上标题，方便区分
+                if (m.targetExe != "" && this._CountExe(m.targetExe) > 1) {
+                    tip := m.targetTitle != "" ? m.targetTitle : m.targetExe
+                    label .= "  [" tip "]"
+                }
+                names.Push(label)
+                if (m.id = want)
+                    choose := i
             }
-            names.Push(label)
-            if (m.id = want)
-                choose := i
+            this.lbMacros.Delete()
+            if (names.Length) {
+                this.lbMacros.Add(names)
+                this.lbMacros.Choose(choose)
+            }
+            this._runMark := mark
+        } finally {
+            this._loadingUi := prevLoading
+            Critical(prevCritical)
         }
-        if (names.Length)
-            this.lbMacros.Add(names)
-        if (names.Length)
-            this.lbMacros.Choose(choose)
-        this._loadingUi := false
+    }
+
+    /** 运行标记有变化时才重建列表，避免定时器高频刷新和用户点击抢控件 */
+    _RefreshRunMarks() {
+        mark := ""
+        for m in this.store.macros
+            mark .= this._IsRunnerActive(m.id) ? "1" : "0"
+        if (mark != this._runMark)
+            this._ReloadMacroList(this.store.activeId)
     }
 
     _CountExe(exe) {
@@ -227,7 +269,14 @@ class AutoKeyApp {
         idx := this.lbMacros.Value
         if (idx < 1)
             return
+        if (idx > this.store.macros.Length) {
+            ; 列表与数据不同步，重建后忽略本次点击
+            this._ReloadMacroList(this.store.activeId)
+            return
+        }
         m := this.store.macros[idx]
+        if (m.id = this.store.activeId)
+            return
         ; 允许切换查看其它配置；其它配置可继续在后台跑
         this.store.SetActive(m.id)
         this._LoadActiveIntoUi()
@@ -351,6 +400,7 @@ class AutoKeyApp {
     ; ───────── UI ↔ 配置 ─────────
 
     _LoadActiveIntoUi() {
+        prevLoading := this._loadingUi
         this._loadingUi := true
         m := this.store.Active()
         m.EnsureKeys()
@@ -372,7 +422,7 @@ class AutoKeyApp {
         this._RefreshKeyList(m)
         this._RefreshStepList(m)
         this._OnModeChange()
-        this._loadingUi := false
+        this._loadingUi := prevLoading
     }
 
     _RefreshKeyList(m := unset) {
@@ -483,33 +533,40 @@ class AutoKeyApp {
         m := this.store.Active()
         this.cfg := m
         this.target := WindowTarget(m)
-        if rebuildSeq || !this.runners.Has(m.id) {
-            seq := Sequencer(m, this.target)
-            mid := m.id
-            seq.onStatus := (t) => this._OnRunnerStatus(mid, t)
-            this.runners[m.id] := seq
-        }
+        ; 正在跑的实例不能被替换，否则旧定时器失去引用、再也停不下来
+        if (rebuildSeq && this._IsRunnerActive(m.id))
+            rebuildSeq := false
+        if (rebuildSeq || !this.runners.Has(m.id))
+            this.runners[m.id] := this._MakeRunner(m)
         this.seq := this.runners[m.id]
     }
 
+    _MakeRunner(m) {
+        mid := m.id
+        seq := Sequencer(m, WindowTarget(m))
+        seq.onStatus := (t) => this._OnRunnerStatus(mid, t)
+        return seq
+    }
+
     _OnRunnerStatus(id, text) {
-        m := this.store.GetById(id)
-        name := m ? m.name : id
-        ; 只在状态栏详细显示当前选中配置；其它配置变化时刷新列表标记
-        if (id = this.store.activeId)
-            this._SetStatus(name ": " text)
-        else
-            this._RefreshStatusBar()
-        this._ReloadMacroList(this.store.activeId)
+        try {
+            m := this.store.GetById(id)
+            name := m ? m.name : id
+            ; 只在状态栏详细显示当前选中配置；其它配置变化时刷新列表标记
+            if (id = this.store.activeId)
+                this._SetStatus(name ": " text)
+            else
+                this._RefreshStatusBar()
+            this._RefreshRunMarks()
+        }
     }
 
     _RefreshStatusBar() {
         running := []
-        for id, seq in this.runners {
-            if seq.IsRunning {
-                m := this.store.GetById(id)
-                running.Push(m ? m.name : id)
-            }
+        ; 按 macros 顺序取，避免枚举 runners 时被其它线程插入新条目
+        for m in this.store.macros {
+            if this._IsRunnerActive(m.id)
+                running.Push(m.name)
         }
         if (running.Length = 0) {
             cur := this.store.Active()
@@ -925,30 +982,24 @@ class AutoKeyApp {
     }
 
     StartMacro(id) {
-        ; 若开始的是当前编辑项，先把界面同步进去
-        if (id = this.store.activeId) {
-            if this._IsRunnerActive(id) {
-                this._SetStatus("已在运行: " this.store.Active().name)
-                return
-            }
-            if !this._ApplyFromUi(false)
-                return
-        } else if this._IsRunnerActive(id) {
+        if this._IsRunnerActive(id) {
+            cur := this.store.GetById(id)
+            this._SetStatus("已在运行: " (cur ? cur.name : id))
             return
-        } else {
-            m := this.store.GetById(id)
-            if !m
-                return
-            this.target := WindowTarget(m)
-            seq := Sequencer(m, this.target)
-            seq.onStatus := (t) => this._OnRunnerStatus(id, t)
-            this.runners[id] := seq
         }
-
-        if !this.runners.Has(id) {
-            this._SyncActiveRefs(true)
-        }
-        this.runners[id].Start()
+        ; 若开始的是当前编辑项，先把界面同步进去
+        if (id = this.store.activeId && !this._ApplyFromUi(false))
+            return
+        m := this.store.GetById(id)
+        if !m
+            return
+        if !this.runners.Has(id)
+            this.runners[id] := this._MakeRunner(m)
+        ; 保存时配置对象会被整体替换，这里把 runner 指向最新的一份
+        seq := this.runners[id]
+        seq.cfg := m
+        seq.target := WindowTarget(m)
+        seq.Start()
         this._ReloadMacroList(this.store.activeId)
         this._RefreshStatusBar()
     }
@@ -961,8 +1012,11 @@ class AutoKeyApp {
     }
 
     StopAll() {
-        for id, seq in this.runners
-            seq.Stop()
+        ids := []
+        for id in this.runners
+            ids.Push(id)
+        for id in ids
+            try this.runners[id].Stop()
         this._ReloadMacroList(this.store.activeId)
         this._SetStatus("已全部停止")
     }
