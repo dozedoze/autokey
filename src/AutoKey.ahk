@@ -501,7 +501,8 @@ class AutoKeyApp {
         d.AddText(, "间隔 ms")
         edInterval := d.AddEdit("w220 Number", cur.interval)
         result := ""
-        d.AddButton("w100 Default", "确定").OnEvent("Click", (*) => {
+
+        OnOk(*) {
             key := Trim(edKey.Value)
             if (key = "") {
                 MsgBox("请填写按键。", "AutoKey", "Icon!")
@@ -509,11 +510,18 @@ class AutoKeyApp {
             }
             result := MacroConfig.NewKey(key, Integer(edInterval.Value || 50))
             d.Destroy()
-        })
-        d.AddButton("x+10 w100", "取消").OnEvent("Click", (*) => (result := "", d.Destroy()))
-        d.OnEvent("Close", (*) => (result := "", d.Destroy()))
+        }
+        OnCancel(*) {
+            result := ""
+            d.Destroy()
+        }
+
+        d.AddButton("w100 Default", "确定").OnEvent("Click", OnOk)
+        d.AddButton("x+10 w100", "取消").OnEvent("Click", OnCancel)
+        d.OnEvent("Close", OnCancel)
+        hwnd := d.Hwnd
         d.Show()
-        WinWaitClose("ahk_id " d.Hwnd)
+        WinWaitClose("ahk_id " hwnd)
         return result
     }
 
@@ -600,17 +608,25 @@ class AutoKeyApp {
         edY := d.AddEdit("w200 Number", s.y)
 
         result := ""
-        d.AddButton("w95 Default", "确定").OnEvent("Click", (*) => {
+
+        OnOk(*) {
             step := this._BuildStepFromDialog(ddl, edKey, edDelay, edHold, edX, edY)
             if !step
                 return
             result := step
             d.Destroy()
-        })
-        d.AddButton("x+10 w95", "取消").OnEvent("Click", (*) => (result := "", d.Destroy()))
-        d.OnEvent("Close", (*) => (result := "", d.Destroy()))
+        }
+        OnCancel(*) {
+            result := ""
+            d.Destroy()
+        }
+
+        d.AddButton("w95 Default", "确定").OnEvent("Click", OnOk)
+        d.AddButton("x+10 w95", "取消").OnEvent("Click", OnCancel)
+        d.OnEvent("Close", OnCancel)
+        hwnd := d.Hwnd
         d.Show()
-        WinWaitClose("ahk_id " d.Hwnd)
+        WinWaitClose("ahk_id " hwnd)
         return result
     }
 

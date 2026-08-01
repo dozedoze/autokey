@@ -268,15 +268,41 @@ class MacroStore {
     }
 
     _DataDir() {
-        d1 := A_ScriptDir "\data"
-        if DirExist(d1)
-            return d1
-        ; 开发：src 的上一级
-        d2 := A_ScriptDir "\..\data"
-        if DirExist(d2)
-            return d2
-        DirCreate(d1)
-        return d1
+        if this.HasProp("_dataDir")
+            return this._dataDir
+
+        ; 优先用 exe/脚本同级目录，便携；不可写时退回用户目录
+        candidates := [A_ScriptDir "\data", A_ScriptDir "\..\data"]
+        for d in candidates {
+            if (DirExist(d) && this._IsWritable(d)) {
+                this._dataDir := d
+                return d
+            }
+        }
+        for d in candidates {
+            try {
+                DirCreate(d)
+                if this._IsWritable(d) {
+                    this._dataDir := d
+                    return d
+                }
+            }
+        }
+
+        fallback := A_AppData "\AutoKey"
+        try DirCreate(fallback)
+        this._dataDir := fallback
+        return fallback
+    }
+
+    _IsWritable(dir) {
+        probe := dir "\.write_test"
+        try {
+            FileAppend("", probe)
+            FileDelete(probe)
+            return true
+        }
+        return false
     }
 
     _DataPath() {

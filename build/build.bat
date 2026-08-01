@@ -20,6 +20,7 @@ set "TOOLS_DIR=%ROOT%\tools\ahk"
 set "OUT_DIR=%ROOT%\dist"
 set "SRC=%ROOT%\src\AutoKey.ahk"
 set "OUT_EXE=%OUT_DIR%\AutoKey.exe"
+set "BUILD_LOG=%OUT_DIR%\build.log"
 
 echo.
 echo [AutoKey] 工作目录: %ROOT%
@@ -50,15 +51,24 @@ if not defined AHK2EXE goto :NoCompiler
 echo.
 echo [AutoKey] Base : %AHK_BASE%
 echo [AutoKey] Comp : %AHK2EXE%
+
+echo [AutoKey] 语法检查...
+"%AHK_BASE%" /ErrorStdOut /validate "%SRC%"
+if errorlevel 1 goto :SyntaxFail
+
 echo [AutoKey] 编译中...
 
 if exist "%OUT_EXE%" del /q "%OUT_EXE%" >nul 2>nul
-"%AHK2EXE%" /in "%SRC%" /out "%OUT_EXE%" /base "%AHK_BASE%" /compress 2 /silent verbose
-if not exist "%OUT_EXE%" (
-  echo [警告] UPX 压缩失败，改用无压缩重试...
-  "%AHK2EXE%" /in "%SRC%" /out "%OUT_EXE%" /base "%AHK_BASE%" /compress 0 /silent verbose
-)
+if exist "%BUILD_LOG%" del /q "%BUILD_LOG%" >nul 2>nul
+
+call :Compile 2
+if exist "%OUT_EXE%" goto :Compiled
+
+echo [警告] 压缩编译未生成 exe（通常是缺 MPRESS），改用无压缩重试...
+call :Compile 0
 if not exist "%OUT_EXE%" goto :CompileFail
+
+:Compiled
 
 if exist "%OUT_DIR%\configs" rmdir /s /q "%OUT_DIR%\configs" >nul 2>nul
 if exist "%ROOT%\configs\*.ini" (
@@ -79,6 +89,13 @@ exit /b 0
 :: ============================================================
 :: 子程序
 :: ============================================================
+
+:Compile
+echo.>>"%BUILD_LOG%"
+echo ===== Ahk2Exe /compress %~1 =====>>"%BUILD_LOG%"
+"%AHK2EXE%" /in "%SRC%" /out "%OUT_EXE%" /base "%AHK_BASE%" /compress %~1 /silent verbose >>"%BUILD_LOG%" 2>&1
+echo [Ahk2Exe] 退出码 %errorlevel%>>"%BUILD_LOG%"
+exit /b 0
 
 :FindAhk
 if not defined AHK_BASE if exist "%LocalAppData%\Programs\AutoHotkey\v2\AutoHotkey64.exe" set "AHK_BASE=%LocalAppData%\Programs\AutoHotkey\v2\AutoHotkey64.exe"
@@ -181,8 +198,24 @@ echo         请检查 %TOOLS_DIR%\Compiler\ 下是否有 Ahk2Exe.exe
 echo         下载地址: https://github.com/AutoHotkey/Ahk2Exe/releases
 goto :Fail
 
+:SyntaxFail
+echo.
+echo [错误] 脚本语法检查未通过，上面一行是 AutoHotkey 报的文件、行号与原因。
+echo         按提示改 src\ 下对应的文件后重新运行本脚本。
+goto :Fail
+
 :CompileFail
 echo [错误] 编译失败，未生成 %OUT_EXE%
+echo.
+echo ---------- Ahk2Exe 输出 ----------
+if exist "%BUILD_LOG%" type "%BUILD_LOG%"
+echo ----------------------------------
+echo.
+echo 上面就是真实原因。常见情况：
+echo   * 脚本语法错误  - 按提示的行号改 src\AutoKey.ahk
+echo   * 找不到 base   - 检查 %TOOLS_DIR%\AutoHotkey64.exe
+echo   * 目录无写权限  - 换到桌面等可写目录再运行
+echo 完整日志: %BUILD_LOG%
 goto :Fail
 
 :Fail

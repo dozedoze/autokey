@@ -66,7 +66,11 @@ build\build.bat
 首次运行会自动把 AutoHotkey v2 和 Ahk2Exe 编译器的**便携版**下载解压到 `tools\ahk\`。  
 完成后得到 `dist\AutoKey.exe`，拷到任意 Windows 机器即可。
 
+编译前会先做一次语法检查（`AutoHotkey64.exe /validate`），脚本有错会直接报出文件和行号。
+
 #### 双击后没有生成 dist 怎么办
+
+先看窗口里 `---------- Ahk2Exe 输出 ----------` 之间的内容，那是真实原因；完整日志在 `dist\build.log`。其它排查：
 
 1. **必须下载整个仓库**，不能只单独下载 `build.bat`
 2. **确认行尾是 CRLF**（仓库已用 `.gitattributes` 处理；若仍有问题见下方 PowerShell 修复）

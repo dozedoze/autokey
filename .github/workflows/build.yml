@@ -44,6 +44,13 @@ jobs:
           Write-Host "Base=$base"
           Write-Host "Compiler=$comp"
 
+      - name: Validate script syntax
+        shell: pwsh
+        run: |
+          $src = Join-Path $env:GITHUB_WORKSPACE "src\AutoKey.ahk"
+          & $env:AHK_BASE /ErrorStdOut /validate $src
+          if ($LASTEXITCODE -ne 0) { throw "syntax check failed (exit $LASTEXITCODE)" }
+
       - name: Compile AutoKey.exe
         shell: pwsh
         run: |
