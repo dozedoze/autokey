@@ -30,6 +30,7 @@ autokey/
 │   ├── spam_space.ini       # 空格连发
 │   └── combo_demo.ini       # 组合序列
 ├── build/build.bat          # Windows 一键编译
+├── tools/ahk/               # 自动下载的 AHK 便携版（gitignore）
 ├── dist/                    # 编译输出（gitignore）
 └── .github/workflows/       # 在 GitHub 上自动打 Windows 包
 ```
@@ -83,6 +84,10 @@ SendMode=Send       ; Send | ControlSend
 build\build.bat
 ```
 
+首次运行会自动把 AutoHotkey v2 和 Ahk2Exe 编译器的**便携版**下载解压到 `tools\ahk\`，
+不安装系统组件、不需要管理员权限，之后再运行就直接复用。
+GitHub 直连失败时会自动切换镜像重试。
+
 完成后得到：
 
 ```
@@ -112,6 +117,21 @@ $p = "build\build.bat"
 
 3. **不要在压缩包里直接双击**，先解压到桌面等可写目录。
 4. 想看完整报错，可在该目录打开 `cmd`，手动执行 `build\build.bat`。
+
+#### 提示「找不到 Ahk2Exe.exe」
+
+AutoHotkey v2 的安装包本身**不包含** Ahk2Exe 编译器，它是独立发布的组件，
+所以「已经装了 AutoHotkey」并不代表能编译。脚本会自动下载它；若下载失败，手动补上即可：
+
+1. 到 [Ahk2Exe releases](https://github.com/AutoHotkey/Ahk2Exe/releases) 下载最新的 zip
+2. 解压到仓库的 `tools\ahk\Compiler\`，确保存在 `tools\ahk\Compiler\Ahk2Exe.exe`
+3. 重新运行 `build\build.bat`
+
+同理，若提示找不到 `AutoHotkey64.exe`，从
+[AutoHotkey releases](https://github.com/AutoHotkey/AutoHotkey/releases) 下载
+`AutoHotkey_2.0.19.zip` 解压到 `tools\ahk\` 即可。
+
+实在下载不动，就走下面的方式 C，让 GitHub Actions 帮你编译。
 
 仓库已用 `.gitattributes` 把 `*.bat` 标记为 `-text`，正常 `git clone` / Download ZIP 得到的都是 CRLF。
 

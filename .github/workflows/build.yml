@@ -11,47 +11,34 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install AutoHotkey v2
+      # AutoHotkey v2 的安装包不含 Ahk2Exe，编译器必须从自己的仓库单独取。
+      - name: Fetch AutoHotkey v2 + Ahk2Exe (portable)
         shell: pwsh
+        env:
+          AHK_VERSION: 2.0.19
+          AHK2EXE_TAG: Ahk2Exe1.1.37.02a2
         run: |
-          $setup = "$env:TEMP\ahk-v2-setup.exe"
-          $urls = @(
-            "https://github.com/AutoHotkey/AutoHotkey/releases/download/v2.0.19/AutoHotkey_2.0.19_setup.exe",
-            "https://www.autohotkey.com/download/ahk-v2.exe"
-          )
-          $ok = $false
-          foreach ($url in $urls) {
-            try {
-              Write-Host "Downloading $url"
-              Invoke-WebRequest -Uri $url -OutFile $setup -UseBasicParsing
-              $ok = $true
-              break
-            } catch {
-              Write-Warning $_
-            }
-          }
-          if (-not $ok) { throw "failed to download AutoHotkey installer" }
-          Start-Process -FilePath $setup -ArgumentList "/silent" -Wait
-          $candidates = @(
-            "$env:ProgramFiles\AutoHotkey\v2\AutoHotkey64.exe",
-            "$env:LocalAppData\Programs\AutoHotkey\v2\AutoHotkey64.exe"
-          )
-          $compilers = @(
-            "$env:ProgramFiles\AutoHotkey\Compiler\Ahk2Exe.exe",
-            "$env:LocalAppData\Programs\AutoHotkey\Compiler\Ahk2Exe.exe"
-          )
-          $base = $candidates | Where-Object { Test-Path $_ } | Select-Object -First 1
-          $comp = $compilers | Where-Object { Test-Path $_ } | Select-Object -First 1
-          if (-not $base) {
-            $base = Get-ChildItem -Path "$env:ProgramFiles\AutoHotkey","$env:LocalAppData\Programs\AutoHotkey" -Recurse -Filter AutoHotkey64.exe -ErrorAction SilentlyContinue |
-              Select-Object -First 1 -ExpandProperty FullName
-          }
-          if (-not $comp) {
-            $comp = Get-ChildItem -Path "$env:ProgramFiles\AutoHotkey","$env:LocalAppData\Programs\AutoHotkey" -Recurse -Filter Ahk2Exe.exe -ErrorAction SilentlyContinue |
-              Select-Object -First 1 -ExpandProperty FullName
-          }
-          if (-not $base) { throw "AutoHotkey64.exe not found after install" }
-          if (-not $comp) { throw "Ahk2Exe.exe not found after install" }
+          $ErrorActionPreference = "Stop"
+          $ProgressPreference = "SilentlyContinue"
+          $tools = Join-Path $env:GITHUB_WORKSPACE "tools\ahk"
+          New-Item -ItemType Directory -Force -Path "$tools\Compiler" | Out-Null
+
+          $ahkZip = "$env:TEMP\AutoHotkey_$env:AHK_VERSION.zip"
+          Invoke-WebRequest -UseBasicParsing -OutFile $ahkZip `
+            -Uri "https://github.com/AutoHotkey/AutoHotkey/releases/download/v$env:AHK_VERSION/AutoHotkey_$env:AHK_VERSION.zip"
+          Expand-Archive -LiteralPath $ahkZip -DestinationPath $tools -Force
+
+          $compZip = "$env:TEMP\$env:AHK2EXE_TAG.zip"
+          Invoke-WebRequest -UseBasicParsing -OutFile $compZip `
+            -Uri "https://github.com/AutoHotkey/Ahk2Exe/releases/download/$env:AHK2EXE_TAG/$env:AHK2EXE_TAG.zip"
+          Expand-Archive -LiteralPath $compZip -DestinationPath "$tools\Compiler" -Force
+
+          $base = Get-ChildItem -Path $tools -Recurse -Filter AutoHotkey64.exe |
+            Select-Object -First 1 -ExpandProperty FullName
+          $comp = Get-ChildItem -Path $tools -Recurse -Filter Ahk2Exe.exe |
+            Select-Object -First 1 -ExpandProperty FullName
+          if (-not $base) { throw "AutoHotkey64.exe not found in $tools" }
+          if (-not $comp) { throw "Ahk2Exe.exe not found in $tools" }
           "AHK_BASE=$base" | Out-File -FilePath $env:GITHUB_ENV -Append
           "AHK2EXE=$comp" | Out-File -FilePath $env:GITHUB_ENV -Append
           Write-Host "Base=$base"
@@ -63,9 +50,9 @@ jobs:
           New-Item -ItemType Directory -Force -Path dist\configs | Out-Null
           $src = Join-Path $env:GITHUB_WORKSPACE "src\AutoKey.ahk"
           $out = Join-Path $env:GITHUB_WORKSPACE "dist\AutoKey.exe"
-          & $env:AHK2EXE /in $src /out $out /base $env:AHK_BASE /compress 2
+          & $env:AHK2EXE /in $src /out $out /base $env:AHK_BASE /compress 2 /silent verbose
           if (-not (Test-Path $out)) {
-            & $env:AHK2EXE /in $src /out $out /base $env:AHK_BASE /compress 0
+            & $env:AHK2EXE /in $src /out $out /base $env:AHK_BASE /compress 0 /silent verbose
           }
           if (-not (Test-Path $out)) { throw "compile failed" }
           Copy-Item -Path "configs\*" -Destination "dist\configs\" -Force
