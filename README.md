@@ -94,6 +94,27 @@ dist/
 把整个 `dist` 拷到任意 Windows 机器即可，无需再装 AutoHotkey。  
 开启 UPX 时体积通常约 **1MB 出头**；若本机无 UPX 会自动退回无压缩（约 1.5–2MB）。
 
+#### 双击后没有生成 dist 怎么办
+
+脚本执行到任何一步失败都会打印原因并 `pause`，窗口不会自动关闭，先看窗口里的提示。若窗口仍然一闪而过，说明 bat 在第一行就无法解析，按顺序排查：
+
+1. **必须下载整个仓库**，不能只单独下载 `build.bat`。它依赖同级的 `..\src\AutoKey.ahk`。
+2. **确认行尾是 CRLF**。若在 macOS/Linux 上编辑或用非 Git 方式传输过 `build.bat`，可能变成 LF 行尾，`cmd.exe` 会直接语法错误退出。在 Windows 上用 PowerShell 检查并修复：
+
+```powershell
+# 检查：输出 True 表示行尾正常
+(Get-Content -Raw build\build.bat) -match "`r`n"
+
+# 修复
+$p = "build\build.bat"
+(Get-Content -Raw $p) -replace "`r?`n", "`r`n" | Set-Content -NoNewline $p
+```
+
+3. **不要在压缩包里直接双击**，先解压到桌面等可写目录。
+4. 想看完整报错，可在该目录打开 `cmd`，手动执行 `build\build.bat`。
+
+仓库已用 `.gitattributes` 把 `*.bat` 标记为 `-text`，正常 `git clone` / Download ZIP 得到的都是 CRLF。
+
 ### 方式 C：在 Mac 上开发，用 GitHub Actions 打包
 
 1. 把仓库推到 GitHub

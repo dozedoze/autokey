@@ -1,0 +1,11 @@
+* text=auto eol=lf
+
+# Windows 脚本必须是 CRLF，否则 cmd.exe 解析 for/^ 续行会语法错误。
+# 用 -text 而不是 eol=crlf，保证仓库里存的就是 CRLF，
+# 这样 GitHub raw 单文件下载和 Download ZIP 拿到的也是 CRLF。
+*.bat -text
+*.cmd -text
+
+*.ps1 text eol=crlf
+*.ahk text eol=crlf
+*.ini text eol=crlf
