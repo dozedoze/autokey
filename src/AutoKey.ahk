@@ -66,20 +66,19 @@ class AutoKeyApp {
         g.AddText("ys w420 Section", "名称")
         this.edName := g.AddEdit("xp w280")
 
-        g.AddText("xp", "模式")
-        this.radSingle := g.AddRadio("xp Checked", "连发模式（默认）")
-        this.radSequence := g.AddRadio("x+12", "按键序列")
-        this.radSingle.OnEvent("Click", (*) => this._OnModeChange())
-        this.radSequence.OnEvent("Click", (*) => this._OnModeChange())
+        ; 点哪个 Tab，就只显示对应编辑区；另一套完全隐藏
+        this.tabMode := g.AddTab3("xp w420 h210", ["连发模式", "按键序列"])
+        this.tabMode.OnEvent("Change", (*) => this._OnModeChange())
 
-        ; 连发区：可动态添加多键位，按列表顺序轮流按下
-        this.grpSingle := g.AddGroupBox("xp w420 h188", "连发键位（可添加多个，按顺序轮流连发）")
-        this.lvKeys := g.AddListView("xp+12 yp+22 w396 r4", ["#", "按键", "间隔ms"])
+        ; —— Tab1：连发模式 ——
+        this.tabMode.UseTab(1)
+        g.AddText("w396", "可添加多个键位，按列表顺序轮流连发")
+        this.lvKeys := g.AddListView("w396 r5", ["#", "按键", "间隔ms"])
         this.lvKeys.ModifyCol(1, 36)
         this.lvKeys.ModifyCol(2, 220)
         this.lvKeys.ModifyCol(3, 90)
 
-        g.AddText("xp", "按键")
+        g.AddText(, "按键")
         this.edSingleKey := g.AddEdit("x+6 yp-3 w88")
         this.btnCapSingle := g.AddButton("x+4 w52", "捕捉")
         this.btnCapSingle.OnEvent("Click", (*) => this._CaptureInto("single"))
@@ -91,21 +90,22 @@ class AutoKeyApp {
         this.btnKeyEdit.OnEvent("Click", (*) => this._EditSpamKey())
         this.btnKeyDel := g.AddButton("x+4 w52", "删除")
         this.btnKeyDel.OnEvent("Click", (*) => this._RemoveSpamKey())
-        this.btnKeyUp := g.AddButton("xp w52", "上移")
+        this.btnKeyUp := g.AddButton("y+8 w52", "上移")
         this.btnKeyUp.OnEvent("Click", (*) => this._MoveSpamKey(-1))
         this.btnKeyDown := g.AddButton("x+4 w52", "下移")
         this.btnKeyDown.OnEvent("Click", (*) => this._MoveSpamKey(1))
 
-        ; 序列区
-        this.grpSeq := g.AddGroupBox("xm+172 y+36 w420 h168", "按键序列（按顺序执行，可含等待/点击）")
-        this.lvSteps := g.AddListView("xp+12 yp+22 w396 r5", ["#", "类型", "内容", "延迟ms", "按住ms"])
+        ; —— Tab2：按键序列 ——
+        this.tabMode.UseTab(2)
+        g.AddText("w396", "按顺序执行步骤，可含按键 / 等待 / 点击")
+        this.lvSteps := g.AddListView("w396 r5", ["#", "类型", "内容", "延迟ms", "按住ms"])
         this.lvSteps.ModifyCol(1, 30)
         this.lvSteps.ModifyCol(2, 50)
         this.lvSteps.ModifyCol(3, 140)
         this.lvSteps.ModifyCol(4, 70)
         this.lvSteps.ModifyCol(5, 70)
 
-        this.btnStepAdd := g.AddButton("xp w72", "添加")
+        this.btnStepAdd := g.AddButton("w72", "添加")
         this.btnStepAdd.OnEvent("Click", (*) => this._AddStep())
         this.btnStepEdit := g.AddButton("x+6 w72", "编辑")
         this.btnStepEdit.OnEvent("Click", (*) => this._EditStep())
@@ -116,8 +116,10 @@ class AutoKeyApp {
         this.btnStepDown := g.AddButton("x+6 w72", "下移")
         this.btnStepDown.OnEvent("Click", (*) => this._MoveStep(1))
 
-        ; 循环 / 热键 / 目标
-        g.AddGroupBox("xm+172 y+14 w420 h88", "循环与热键")
+        ; —— 公共设置（不在 Tab 内）——
+        this.tabMode.UseTab(0)
+
+        g.AddGroupBox("xm+172 y+10 w420 h88", "循环与热键")
         this.chkLoop := g.AddCheckbox("xp+12 yp+22 Checked", "循环")
         g.AddText("x+8", "轮间隔 ms")
         this.edLoopDelay := g.AddEdit("x+6 w60 Number", "200")
@@ -160,11 +162,15 @@ class AutoKeyApp {
         this.btnPause := g.AddButton("x+8 w80", "暂停")
         this.btnPause.OnEvent("Click", (*) => this.TogglePause())
 
-        g.AddText("xm+172 y+10 cGray w420", "提示：改完点「保存并应用」。配置自动存到 data，无需手改文件。停止热键始终有效。")
+        g.AddText("xm+172 y+10 cGray w420", "提示：点上方 Tab 切换编辑区。改完点「保存并应用」。停止热键始终有效。")
 
         this.gui := g
         this._OnModeChange()
         g.Show()
+    }
+
+    _IsSingleMode() {
+        return this.tabMode.Value = 1
     }
 
     ; ───────── 列表 / 切换 ─────────
@@ -269,11 +275,7 @@ class AutoKeyApp {
         m := this.store.Active()
         m.EnsureKeys()
         this.edName.Value := m.name
-        if (m.mode = "sequence") {
-            this.radSequence.Value := 1
-        } else {
-            this.radSingle.Value := 1
-        }
+        this.tabMode.Value := (m.mode = "sequence") ? 2 : 1
         this.edSingleKey.Value := ""
         this.edInterval.Value := m.keys.Length ? m.keys[1].interval : 50
         this.chkLoop.Value := m.loop ? 1 : 0
@@ -329,26 +331,10 @@ class AutoKeyApp {
     }
 
     _OnModeChange() {
-        isSingle := !!this.radSingle.Value
-        this.lvKeys.Enabled := isSingle
-        this.edSingleKey.Enabled := isSingle
-        this.edInterval.Enabled := isSingle
-        this.btnCapSingle.Enabled := isSingle
-        this.btnKeyAdd.Enabled := isSingle
-        this.btnKeyEdit.Enabled := isSingle
-        this.btnKeyDel.Enabled := isSingle
-        this.btnKeyUp.Enabled := isSingle
-        this.btnKeyDown.Enabled := isSingle
-        this.lvSteps.Enabled := !isSingle
-        this.btnStepAdd.Enabled := !isSingle
-        this.btnStepEdit.Enabled := !isSingle
-        this.btnStepDel.Enabled := !isSingle
-        this.btnStepUp.Enabled := !isSingle
-        this.btnStepDown.Enabled := !isSingle
-        if isSingle
-            this._SetStatus("模式: 连发 — 可添加多个键位，按列表顺序轮流按下")
+        if this._IsSingleMode()
+            this._SetStatus("当前编辑区: 连发模式")
         else
-            this._SetStatus("模式: 按键序列 — 编排按键/等待/点击步骤")
+            this._SetStatus("当前编辑区: 按键序列")
     }
 
     _CollectFromUi() {
@@ -356,7 +342,7 @@ class AutoKeyApp {
         m.name := Trim(this.edName.Value)
         if (m.name = "")
             m.name := "未命名"
-        m.mode := this.radSingle.Value ? "single" : "sequence"
+        m.mode := this._IsSingleMode() ? "single" : "sequence"
         m.loop := this.chkLoop.Value ? 1 : 0
         m.loopDelay := Integer(this.edLoopDelay.Value || 0)
         m.repeat := Integer(this.edRepeat.Value || 0)
@@ -415,8 +401,8 @@ class AutoKeyApp {
     ; ───────── 连发键位编辑 ─────────
 
     _AddSpamKey(key := unset) {
-        if !this.radSingle.Value {
-            MsgBox("请先切换到「连发模式」。", "AutoKey", "Icon!")
+        if !this._IsSingleMode() {
+            MsgBox("请先切换到「连发模式」页。", "AutoKey", "Icon!")
             return
         }
         if !IsSet(key)
@@ -437,7 +423,7 @@ class AutoKeyApp {
     }
 
     _EditSpamKey() {
-        if !this.radSingle.Value
+        if !this._IsSingleMode()
             return
         row := this.lvKeys.GetNext()
         if !row {
@@ -456,7 +442,7 @@ class AutoKeyApp {
     }
 
     _RemoveSpamKey() {
-        if !this.radSingle.Value
+        if !this._IsSingleMode()
             return
         row := this.lvKeys.GetNext()
         if !row
@@ -472,7 +458,7 @@ class AutoKeyApp {
     }
 
     _MoveSpamKey(dir) {
-        if !this.radSingle.Value
+        if !this._IsSingleMode()
             return
         row := this.lvKeys.GetNext()
         if !row
@@ -528,8 +514,8 @@ class AutoKeyApp {
     ; ───────── 步骤编辑 ─────────
 
     _AddStep() {
-        if this.radSingle.Value {
-            MsgBox("请先切换到「按键序列」模式。", "AutoKey", "Icon!")
+        if this._IsSingleMode() {
+            MsgBox("请先切换到「按键序列」页。", "AutoKey", "Icon!")
             return
         }
         step := this._StepDialog()
@@ -657,7 +643,7 @@ class AutoKeyApp {
         switch which {
             case "single":
                 this.edSingleKey.Value := key
-                if this.radSingle.Value {
+                if this._IsSingleMode() {
                     this._AddSpamKey(key)
                     return
                 }
