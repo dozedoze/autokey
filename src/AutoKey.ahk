@@ -505,7 +505,18 @@ class AutoKeyApp {
             case "sleep": return s.delay " ms"
             case "click":
                 btn := MacroConfig.NormalizeButton(s.HasOwnProp("button") ? s.button : "Left")
-                return (btn = "Right" ? "右键 " : "左键 ") "(" s.x ", " s.y ")"
+                clicks := MacroConfig.NormalizeClicks(s.HasOwnProp("clicks") ? s.clicks : 1)
+                gap := MacroConfig.NormalizeClickGap(s.HasOwnProp("clickGap") ? s.clickGap : 80)
+                label := (btn = "Right" ? "右键" : "左键")
+                if (clicks = 2)
+                    label .= "双击"
+                else if (clicks > 2)
+                    label .= "×" clicks
+                else
+                    label .= "单击"
+                if (clicks > 1)
+                    label .= " /" gap "ms"
+                return label " (" s.x ", " s.y ")"
             default: return s.key
         }
     }
@@ -855,9 +866,14 @@ class AutoKeyApp {
         edHold := ""
         edPoint := ""
         ddlButton := ""
+        ddlClicks := ""
+        edClicks := ""
+        edClickGap := ""
         pickedX := Integer(s.x)
         pickedY := Integer(s.y)
         hasPoint := isEdit && kind = "click"
+        curClicks := MacroConfig.NormalizeClicks(s.HasOwnProp("clicks") ? s.clicks : 1)
+        curGap := MacroConfig.NormalizeClickGap(s.HasOwnProp("clickGap") ? s.clickGap : 80)
 
         switch kind {
             case "key":
@@ -879,11 +895,48 @@ class AutoKeyApp {
                 d.AddText(, "鼠标按键")
                 ddlButton := d.AddDropDownList("w240", ["左键", "右键"])
                 ddlButton.Choose(MacroConfig.NormalizeButton(s.button) = "Right" ? 2 : 1)
+                d.AddText(, "点击方式")
+                ddlClicks := d.AddDropDownList("w240", ["单击", "双击", "自定义次数"])
+                if (curClicks = 1)
+                    ddlClicks.Choose(1)
+                else if (curClicks = 2)
+                    ddlClicks.Choose(2)
+                else
+                    ddlClicks.Choose(3)
+                d.AddText(, "自定义次数（选「自定义」时生效，1–20）")
+                edClicks := d.AddEdit("w240 Number", curClicks)
+                d.AddText(, "连点间隔 ms（双击/多次之间，游戏建议 60–120）")
+                edClickGap := d.AddEdit("w240 Number", curGap)
+                ddlClicks.OnEvent("Change", (*) => SyncClicksUi())
+                SyncClicksUi()
                 d.AddText(, "执行后延迟 ms")
                 edDelay := d.AddEdit("w240 Number", s.delay)
         }
 
         result := ""
+
+        SyncClicksUi(*) {
+            if !ddlClicks || !edClicks
+                return
+            ; 单击/双击时次数框只读展示；自定义才可改
+            if (ddlClicks.Value = 1) {
+                edClicks.Value := 1
+                edClicks.Opt("+ReadOnly")
+            } else if (ddlClicks.Value = 2) {
+                edClicks.Value := 2
+                edClicks.Opt("+ReadOnly")
+            } else {
+                edClicks.Opt("-ReadOnly")
+                if (Integer(edClicks.Value || 0) < 3)
+                    edClicks.Value := Max(3, curClicks)
+            }
+            if edClickGap {
+                if (ddlClicks.Value = 1)
+                    edClickGap.Opt("+ReadOnly")
+                else
+                    edClickGap.Opt("-ReadOnly")
+            }
+        }
 
         PickPoint(*) {
             point := this._PickClickPoint(d)
@@ -896,7 +949,7 @@ class AutoKeyApp {
         }
 
         OnOk(*) {
-            step := this._BuildStepFromDialog(kind, edKey, edDelay, edHold, pickedX, pickedY, hasPoint, ddlButton)
+            step := this._BuildStepFromDialog(kind, edKey, edDelay, edHold, pickedX, pickedY, hasPoint, ddlButton, ddlClicks, edClicks, edClickGap)
             if !step
                 return
             result := step
@@ -916,7 +969,7 @@ class AutoKeyApp {
         return result
     }
 
-    _BuildStepFromDialog(kind, edKey, edDelay, edHold, x, y, hasPoint := false, ddlButton := "") {
+    _BuildStepFromDialog(kind, edKey, edDelay, edHold, x, y, hasPoint := false, ddlButton := "", ddlClicks := "", edClicks := "", edClickGap := "") {
         delay := Integer(edDelay.Value || 50)
         if (kind = "sleep")
             return MacroConfig.NewStep("sleep", "", delay)
@@ -926,7 +979,17 @@ class AutoKeyApp {
                 return ""
             }
             button := (ddlButton && ddlButton.Value = 2) ? "Right" : "Left"
-            return MacroConfig.NewStep("click", "", delay, 0, x, y, button)
+            clicks := 1
+            if (ddlClicks && ddlClicks.Value = 2)
+                clicks := 2
+            else if (ddlClicks && ddlClicks.Value = 3)
+                clicks := Integer(edClicks ? edClicks.Value : 3)
+            else if (ddlClicks && ddlClicks.Value = 1)
+                clicks := 1
+            else
+                clicks := Integer(edClicks ? edClicks.Value : 1)
+            gap := Integer(edClickGap ? (edClickGap.Value || 80) : 80)
+            return MacroConfig.NewStep("click", "", delay, 0, x, y, button, clicks, gap)
         }
         key := Trim(edKey.Value)
         if (key = "") {

@@ -78,7 +78,9 @@ class MacroConfig {
                 hold: Integer(s.HasOwnProp("hold") ? s.hold : 0),
                 x: Integer(s.HasOwnProp("x") ? s.x : 0),
                 y: Integer(s.HasOwnProp("y") ? s.y : 0),
-                button: MacroConfig.NormalizeButton(s.HasOwnProp("button") ? s.button : "Left")
+                button: MacroConfig.NormalizeButton(s.HasOwnProp("button") ? s.button : "Left"),
+                clicks: MacroConfig.NormalizeClicks(s.HasOwnProp("clicks") ? s.clicks : 1),
+                clickGap: MacroConfig.NormalizeClickGap(s.HasOwnProp("clickGap") ? s.clickGap : 80)
             })
         }
         return out
@@ -123,11 +125,13 @@ class MacroConfig {
             hold: s.HasOwnProp("hold") ? s.hold : 0,
             x: s.HasOwnProp("x") ? s.x : 0,
             y: s.HasOwnProp("y") ? s.y : 0,
-            button: MacroConfig.NormalizeButton(s.HasOwnProp("button") ? s.button : "Left")
+            button: MacroConfig.NormalizeButton(s.HasOwnProp("button") ? s.button : "Left"),
+            clicks: MacroConfig.NormalizeClicks(s.HasOwnProp("clicks") ? s.clicks : 1),
+            clickGap: MacroConfig.NormalizeClickGap(s.HasOwnProp("clickGap") ? s.clickGap : 80)
         }
     }
 
-    static NewStep(kind := "key", key := "a", delay := 100, hold := 0, x := 0, y := 0, button := "Left") {
+    static NewStep(kind := "key", key := "a", delay := 100, hold := 0, x := 0, y := 0, button := "Left", clicks := 1, clickGap := 80) {
         return {
             kind: kind,
             key: key,
@@ -135,7 +139,9 @@ class MacroConfig {
             hold: hold,
             x: x,
             y: y,
-            button: MacroConfig.NormalizeButton(button)
+            button: MacroConfig.NormalizeButton(button),
+            clicks: MacroConfig.NormalizeClicks(clicks),
+            clickGap: MacroConfig.NormalizeClickGap(clickGap)
         }
     }
 
@@ -145,6 +151,26 @@ class MacroConfig {
         if (b = "right" || b = "r" || b = "右键")
             return "Right"
         return "Left"
+    }
+
+    /** 点击次数：至少 1，上限 20，避免误填把机器点爆 */
+    static NormalizeClicks(raw := 1) {
+        n := Integer(raw || 1)
+        if (n < 1)
+            n := 1
+        if (n > 20)
+            n := 20
+        return n
+    }
+
+    /** 连点间隔 ms：两次点击之间的空隙，默认 80，游戏比系统双击更吃间隔 */
+    static NormalizeClickGap(raw := 80) {
+        n := Integer(IsSet(raw) ? raw : 80)
+        if (n < 0)
+            n := 0
+        if (n > 2000)
+            n := 2000
+        return n
     }
 
     /**
@@ -248,7 +274,9 @@ class MacroConfig {
                 Integer(parts.Length >= 4 ? parts[4] : 50), 0,
                 Integer(parts.Length >= 2 ? parts[2] : 0),
                 Integer(parts.Length >= 3 ? parts[3] : 0),
-                parts.Length >= 5 ? parts[5] : "Left"
+                parts.Length >= 5 ? parts[5] : "Left",
+                parts.Length >= 6 ? parts[6] : 1,
+                parts.Length >= 7 ? parts[7] : 80
             )
         return MacroConfig.NewStep(
             "key", parts[1],
@@ -446,13 +474,15 @@ class MacroStore {
             IniWrite(m.sendMode, path, sec, "SendMode")
             IniWrite(m.steps.Length, path, sec, "StepCount")
             for si, s in m.steps {
-                ; kind|key|delay|hold|x|y|button
+                ; kind|key|delay|hold|x|y|button|clicks|clickGap
                 line := s.kind "|" (s.HasOwnProp("key") ? s.key : "") "|"
                     . Integer(s.HasOwnProp("delay") ? s.delay : 50) "|"
                     . Integer(s.HasOwnProp("hold") ? s.hold : 0) "|"
                     . Integer(s.HasOwnProp("x") ? s.x : 0) "|"
                     . Integer(s.HasOwnProp("y") ? s.y : 0) "|"
-                    . MacroConfig.NormalizeButton(s.HasOwnProp("button") ? s.button : "Left")
+                    . MacroConfig.NormalizeButton(s.HasOwnProp("button") ? s.button : "Left") "|"
+                    . MacroConfig.NormalizeClicks(s.HasOwnProp("clicks") ? s.clicks : 1) "|"
+                    . MacroConfig.NormalizeClickGap(s.HasOwnProp("clickGap") ? s.clickGap : 80)
                 IniWrite(line, path, sec, "Step" si)
             }
         }
@@ -523,7 +553,9 @@ class MacroStore {
                     Integer(parts.Length >= 4 ? parts[4] : 0),
                     Integer(parts.Length >= 5 ? parts[5] : 0),
                     Integer(parts.Length >= 6 ? parts[6] : 0),
-                    parts.Length >= 7 ? parts[7] : "Left"
+                    parts.Length >= 7 ? parts[7] : "Left",
+                    parts.Length >= 8 ? parts[8] : 1,
+                    parts.Length >= 9 ? parts[9] : 80
                 ))
             }
             this.macros.Push(m)

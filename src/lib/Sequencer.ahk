@@ -133,7 +133,9 @@ class Sequencer {
                 return Integer(step.delay)
             case "click":
                 button := MacroConfig.NormalizeButton(step.HasOwnProp("button") ? step.button : "Left")
-                this._RealClick(hwnd, Integer(step.x), Integer(step.y), button)
+                clicks := MacroConfig.NormalizeClicks(step.HasOwnProp("clicks") ? step.clicks : 1)
+                gap := MacroConfig.NormalizeClickGap(step.HasOwnProp("clickGap") ? step.clickGap : 80)
+                this._RealClick(hwnd, Integer(step.x), Integer(step.y), button, clicks, gap)
                 return Integer(step.delay)
             default:
                 this._SendKey(step.key, hwnd, step.hold)
@@ -146,10 +148,12 @@ class Sequencer {
      * 通过全局门闩排队，多套配置同时跑时轮流点各自窗口，不会两只“手”互抢乱点。
      * 点击期间屏蔽滚轮/中键，避免游戏把杂讯当成拉镜头。
      */
-    _RealClick(hwnd, clientX, clientY, button := "Left") {
+    _RealClick(hwnd, clientX, clientY, button := "Left", clicks := 1, clickGap := 80) {
         if !this._AcquireMouse()
             return
         wheelBlocked := false
+        clicks := MacroConfig.NormalizeClicks(clicks)
+        clickGap := MacroConfig.NormalizeClickGap(clickGap)
         try {
             point := Buffer(8, 0)
             NumPut("Int", clientX, point, 0)
@@ -177,14 +181,18 @@ class Sequencer {
                 screenY := NumGet(point, 4, "Int")
             }
 
-            ; 先挪到目标再单独点按键，避免 Click x y Left 被个别环境误解析
+            ; 先挪到目标，再按间隔逐次点击（太快游戏常认不出双击）
             CoordMode "Mouse", "Screen"
             MouseMove screenX, screenY, 0
             Sleep 15
-            if (button = "Right")
-                Click "Right"
-            else
-                Click "Left"
+            btn := (button = "Right") ? "Right" : "Left"
+            loop clicks {
+                if this._stopRequested
+                    break
+                Click(btn)
+                if (A_Index < clicks && clickGap > 0)
+                    this._SleepChunked(clickGap)
+            }
             Sleep 30
         } finally {
             if wheelBlocked
