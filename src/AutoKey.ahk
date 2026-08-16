@@ -1,5 +1,6 @@
 #Requires AutoHotkey v2.0+
 #SingleInstance Force
+#MaxThreads 32
 Persistent
 SetTitleMatchMode 2
 SendMode "Input"

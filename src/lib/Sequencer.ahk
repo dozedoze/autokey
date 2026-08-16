@@ -9,6 +9,10 @@
 class Sequencer {
     ; 全局鼠标门闩：同一时刻只允许一次真实点击（含激活窗口）
     static mouseBusy := false
+    static mouseOwner := ""
+    static mouseSince := 0
+    ; 持锁过久视为泄漏（线程被掐断/异常），允许其它配置抢回，避免全体假死
+    static mouseStaleMs := 5000
 
     __New(cfg, target) {
         this.cfg := cfg
@@ -59,6 +63,9 @@ class Sequencer {
         this.paused := false
         this.running := false
         try SetTimer(this._tickFn, 0)
+        ; 若正好持有鼠标锁，立刻释放，避免其它配置一直重试
+        if (Sequencer.mouseBusy && Sequencer.mouseOwner = (this.cfg.HasOwnProp("id") ? this.cfg.id : ""))
+            this._ReleaseMouse()
         try this.target.Release()
         this._Notify("已停止")
     }
@@ -93,6 +100,14 @@ class Sequencer {
         step := this._steps[this._stepIndex]
         try {
             waitMs := this._ExecStep(step, hwnd)
+            ; 鼠标正被其它配置占用：不前进步骤，稍后再试同一点击
+            ; （禁止在定时器里 Sleep 死等拿锁，否则多开时易占满 AHK 线程，
+            ;  一次性 SetTimer 再也唤不醒，界面仍显示运行中但实际已停）
+            if (waitMs < 0) {
+                if !this._stopRequested && this.running
+                    SetTimer(this._tickFn, -40)
+                return
+            }
             this._hasExecutedStep := true
         } catch as e {
             ; 目标窗口可能刚被关闭：定时器线程里不能抛未捕获异常，等下一轮重找
@@ -132,7 +147,10 @@ class Sequencer {
         SetTimer(this._tickFn, -Max(1, Integer(waitMs)))
     }
 
-    /** 执行一步，返回下一步前应等待的毫秒数 */
+    /**
+     * 执行一步，返回下一步前应等待的毫秒数。
+     * 返回 -1 表示本步（点击）需重试，调用方不得前进 stepIndex。
+     */
     _ExecStep(step, hwnd) {
         switch step.kind {
             case "sleep":
@@ -141,7 +159,8 @@ class Sequencer {
                 button := MacroConfig.NormalizeButton(step.HasOwnProp("button") ? step.button : "Left")
                 clicks := MacroConfig.NormalizeClicks(step.HasOwnProp("clicks") ? step.clicks : 1)
                 gap := MacroConfig.NormalizeClickGap(step.HasOwnProp("clickGap") ? step.clickGap : 80)
-                this._RealClick(hwnd, Integer(step.x), Integer(step.y), button, clicks, gap)
+                if !this._RealClick(hwnd, Integer(step.x), Integer(step.y), button, clicks, gap)
+                    return -1
                 return Integer(step.delay)
             default:
                 this._SendKey(step.key, hwnd, step.hold)
@@ -153,10 +172,11 @@ class Sequencer {
      * 真实鼠标点击（对游戏更有效）。
      * 通过全局门闩排队，多套配置同时跑时轮流点各自窗口，不会两只“手”互抢乱点。
      * 点击期间屏蔽滚轮/中键，避免游戏把杂讯当成拉镜头。
+     * @returns {Integer} 1=已点击 0=暂时拿不到鼠标（调用方应重试同一步）
      */
     _RealClick(hwnd, clientX, clientY, button := "Left", clicks := 1, clickGap := 80) {
-        if !this._AcquireMouse()
-            return
+        if !this._TryAcquireMouse()
+            return 0
         wheelBlocked := false
         clicks := MacroConfig.NormalizeClicks(clicks)
         clickGap := MacroConfig.NormalizeClickGap(clickGap)
@@ -202,10 +222,12 @@ class Sequencer {
                     this._SleepChunked(clickGap)
             }
             Sleep 30
+            return 1
         } finally {
+            ; 先解锁，避免关热键异常时门闩泄漏导致三开全体假死
+            this._ReleaseMouse()
             if wheelBlocked
                 this._BlockCameraNoise(false)
-            this._ReleaseMouse()
         }
     }
 
@@ -241,25 +263,41 @@ class Sequencer {
     static _Noop(*) {
     }
 
-    /** @returns {Integer} 1=拿到锁 0=已停止/取消 */
-    _AcquireMouse() {
-        loop {
-            if this._stopRequested || !this.running
-                return 0
-            Critical "On"
-            if !Sequencer.mouseBusy {
-                Sequencer.mouseBusy := true
-                Critical "Off"
-                return 1
-            }
+    /**
+     * 非阻塞抢鼠标锁。拿不到立刻返回 0，由定时器稍后重试，
+     * 避免多套配置在 Sleep 里互相堵死占满线程。
+     * @returns {Integer} 1=拿到锁 0=忙或已停止
+     */
+    _TryAcquireMouse() {
+        if this._stopRequested || !this.running
+            return 0
+        owner := this.cfg.HasOwnProp("id") ? this.cfg.id : ""
+        Critical "On"
+        if !Sequencer.mouseBusy {
+            Sequencer.mouseBusy := true
+            Sequencer.mouseOwner := owner
+            Sequencer.mouseSince := A_TickCount
             Critical "Off"
-            Sleep 20
+            return 1
         }
+        ; 持锁超时：视为泄漏，抢回以免全体卡在「运行中」
+        held := A_TickCount - Sequencer.mouseSince
+        if (Sequencer.mouseSince > 0 && held >= Sequencer.mouseStaleMs) {
+            Sequencer.mouseBusy := true
+            Sequencer.mouseOwner := owner
+            Sequencer.mouseSince := A_TickCount
+            Critical "Off"
+            return 1
+        }
+        Critical "Off"
+        return 0
     }
 
     _ReleaseMouse() {
         Critical "On"
         Sequencer.mouseBusy := false
+        Sequencer.mouseOwner := ""
+        Sequencer.mouseSince := 0
         Critical "Off"
     }
 
