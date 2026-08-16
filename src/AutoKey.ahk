@@ -511,10 +511,44 @@ class AutoKeyApp {
     }
 
     _OnModeChange() {
+        if this._loadingUi
+            return
+        ; Tab 一切换就落盘模式，避免「配了序列步骤却仍按连发跑」
+        m := this.store.Active()
+        if !m
+            return
+        want := this._IsSingleMode() ? "single" : "sequence"
+        if (m.mode != want) {
+            m.mode := want
+            this.store.Save()
+        }
+        this._SetStatus(want = "single" ? "当前编辑区: 连发模式" : "当前编辑区: 按键序列")
+    }
+
+    /** 编辑序列步骤时强制写成 sequence，避免只改了 steps 却还是 single */
+    _EnsureSequenceMode() {
+        m := this.store.Active()
+        if !m
+            return
+        if (m.mode != "sequence") {
+            m.mode := "sequence"
+            this.store.Save()
+        }
         if this._IsSingleMode()
-            this._SetStatus("当前编辑区: 连发模式")
-        else
-            this._SetStatus("当前编辑区: 按键序列")
+            this.tabMode.Value := 2
+    }
+
+    /** 编辑连发键位时强制写成 single */
+    _EnsureSingleMode() {
+        m := this.store.Active()
+        if !m
+            return
+        if (m.mode != "single") {
+            m.mode := "single"
+            this.store.Save()
+        }
+        if !this._IsSingleMode()
+            this.tabMode.Value := 1
     }
 
     _CollectFromUi() {
@@ -648,6 +682,7 @@ class AutoKeyApp {
         interval := Integer(this.edInterval.Value || 50)
         if (interval < 0)
             interval := 0
+        this._EnsureSingleMode()
         this.store.Active().keys.Push(MacroConfig.NewKey(key, interval))
         this.store.Active().SyncLegacySingle()
         this.store.Save()
@@ -755,6 +790,7 @@ class AutoKeyApp {
         step := this._StepDialog(kind)
         if !step
             return
+        this._EnsureSequenceMode()
         this.store.Active().steps.Push(step)
         this.store.Save()
         this._RefreshStepList()
@@ -773,6 +809,7 @@ class AutoKeyApp {
         step := this._StepDialog(cur.kind, cur)
         if !step
             return
+        this._EnsureSequenceMode()
         this.store.Active().steps[row] := step
         this.store.Save()
         this._RefreshStepList()
@@ -783,6 +820,7 @@ class AutoKeyApp {
         row := this.lvSteps.GetNext()
         if !row
             return
+        this._EnsureSequenceMode()
         this.store.Active().steps.RemoveAt(row)
         this.store.Save()
         this._RefreshStepList()
@@ -792,6 +830,7 @@ class AutoKeyApp {
         row := this.lvSteps.GetNext()
         if !row
             return
+        this._EnsureSequenceMode()
         steps := this.store.Active().steps
         newRow := row + dir
         if (newRow < 1 || newRow > steps.Length)

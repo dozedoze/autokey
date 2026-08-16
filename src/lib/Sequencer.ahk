@@ -3,8 +3,13 @@
 /**
  * 按键序列执行器：定时器驱动，避免 ControlSend 阻塞导致停止按钮无响应。
  * 支持多实例并行（每个配置一套 Sequencer）。
+ *
+ * 真实鼠标点击通过全局门闩排队：多窗口可同时跑，点击会轮流执行，互不抢乱。
  */
 class Sequencer {
+    ; 全局鼠标门闩：同一时刻只允许一次真实点击（含激活窗口）
+    static mouseBusy := false
+
     __New(cfg, target) {
         this.cfg := cfg
         this.target := target
@@ -128,24 +133,73 @@ class Sequencer {
                 return Integer(step.delay)
             case "click":
                 button := MacroConfig.NormalizeButton(step.HasOwnProp("button") ? step.button : "Left")
-                if (this.target.sendMode = "controlsend") {
-                    ControlClick("x" step.x " y" step.y, "ahk_id " hwnd, , button, 1, "NA")
-                } else {
-                    point := Buffer(8, 0)
-                    NumPut("Int", Integer(step.x), point, 0)
-                    NumPut("Int", Integer(step.y), point, 4)
-                    if !DllCall("ClientToScreen", "Ptr", hwnd, "Ptr", point)
-                        throw Error("无法换算目标窗口点击坐标")
-                    screenX := NumGet(point, 0, "Int")
-                    screenY := NumGet(point, 4, "Int")
-                    CoordMode "Mouse", "Screen"
-                    Click screenX, screenY, button
-                }
+                this._RealClick(hwnd, Integer(step.x), Integer(step.y), button)
                 return Integer(step.delay)
             default:
                 this._SendKey(step.key, hwnd, step.hold)
                 return Integer(step.delay)
         }
+    }
+
+    /**
+     * 真实鼠标点击（对游戏更有效）。
+     * 通过全局门闩排队，多套配置同时跑时轮流点各自窗口，不会两只“手”互抢乱点。
+     */
+    _RealClick(hwnd, clientX, clientY, button := "Left") {
+        if !this._AcquireMouse()
+            return
+        try {
+            point := Buffer(8, 0)
+            NumPut("Int", clientX, point, 0)
+            NumPut("Int", clientY, point, 4)
+            if !DllCall("ClientToScreen", "Ptr", hwnd, "Ptr", point)
+                throw Error("无法换算目标窗口点击坐标")
+            screenX := NumGet(point, 0, "Int")
+            screenY := NumGet(point, 4, "Int")
+
+            if !WinExist("ahk_id " hwnd)
+                throw Error("目标窗口已关闭")
+            try {
+                WinActivate("ahk_id " hwnd)
+                WinWaitActive("ahk_id " hwnd, , 0.25)
+            }
+            ; 置前后再换算一次，避免边框/DPI 造成偏移
+            NumPut("Int", clientX, point, 0)
+            NumPut("Int", clientY, point, 4)
+            if DllCall("ClientToScreen", "Ptr", hwnd, "Ptr", point) {
+                screenX := NumGet(point, 0, "Int")
+                screenY := NumGet(point, 4, "Int")
+            }
+
+            CoordMode "Mouse", "Screen"
+            Click screenX, screenY, button
+            ; 给目标一点点处理时间，再交给下一扇窗口
+            Sleep 30
+        } finally {
+            this._ReleaseMouse()
+        }
+    }
+
+    /** @returns {Integer} 1=拿到锁 0=已停止/取消 */
+    _AcquireMouse() {
+        loop {
+            if this._stopRequested || !this.running
+                return 0
+            Critical "On"
+            if !Sequencer.mouseBusy {
+                Sequencer.mouseBusy := true
+                Critical "Off"
+                return 1
+            }
+            Critical "Off"
+            Sleep 20
+        }
+    }
+
+    _ReleaseMouse() {
+        Critical "On"
+        Sequencer.mouseBusy := false
+        Critical "Off"
     }
 
     _SendKey(key, hwnd, hold := 0) {
