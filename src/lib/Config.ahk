@@ -62,7 +62,8 @@ class MacroConfig {
                     delay: Integer(k.interval),
                     hold: 0,
                     x: 0,
-                    y: 0
+                    y: 0,
+                    button: "Left"
                 })
             }
             return out
@@ -76,7 +77,8 @@ class MacroConfig {
                 delay: Integer(s.HasOwnProp("delay") ? s.delay : 50),
                 hold: Integer(s.HasOwnProp("hold") ? s.hold : 0),
                 x: Integer(s.HasOwnProp("x") ? s.x : 0),
-                y: Integer(s.HasOwnProp("y") ? s.y : 0)
+                y: Integer(s.HasOwnProp("y") ? s.y : 0),
+                button: MacroConfig.NormalizeButton(s.HasOwnProp("button") ? s.button : "Left")
             })
         }
         return out
@@ -120,12 +122,29 @@ class MacroConfig {
             delay: s.HasOwnProp("delay") ? s.delay : 50,
             hold: s.HasOwnProp("hold") ? s.hold : 0,
             x: s.HasOwnProp("x") ? s.x : 0,
-            y: s.HasOwnProp("y") ? s.y : 0
+            y: s.HasOwnProp("y") ? s.y : 0,
+            button: MacroConfig.NormalizeButton(s.HasOwnProp("button") ? s.button : "Left")
         }
     }
 
-    static NewStep(kind := "key", key := "a", delay := 100, hold := 0, x := 0, y := 0) {
-        return { kind: kind, key: key, delay: delay, hold: hold, x: x, y: y }
+    static NewStep(kind := "key", key := "a", delay := 100, hold := 0, x := 0, y := 0, button := "Left") {
+        return {
+            kind: kind,
+            key: key,
+            delay: delay,
+            hold: hold,
+            x: x,
+            y: y,
+            button: MacroConfig.NormalizeButton(button)
+        }
+    }
+
+    /** 统一成 Left / Right，兼容旧配置缺字段 */
+    static NormalizeButton(raw := "Left") {
+        b := StrLower(Trim(raw))
+        if (b = "right" || b = "r" || b = "右键")
+            return "Right"
+        return "Left"
     }
 
     /**
@@ -228,7 +247,8 @@ class MacroConfig {
                 "click", "",
                 Integer(parts.Length >= 4 ? parts[4] : 50), 0,
                 Integer(parts.Length >= 2 ? parts[2] : 0),
-                Integer(parts.Length >= 3 ? parts[3] : 0)
+                Integer(parts.Length >= 3 ? parts[3] : 0),
+                parts.Length >= 5 ? parts[5] : "Left"
             )
         return MacroConfig.NewStep(
             "key", parts[1],
@@ -426,12 +446,13 @@ class MacroStore {
             IniWrite(m.sendMode, path, sec, "SendMode")
             IniWrite(m.steps.Length, path, sec, "StepCount")
             for si, s in m.steps {
-                ; kind|key|delay|hold|x|y
+                ; kind|key|delay|hold|x|y|button
                 line := s.kind "|" (s.HasOwnProp("key") ? s.key : "") "|"
                     . Integer(s.HasOwnProp("delay") ? s.delay : 50) "|"
                     . Integer(s.HasOwnProp("hold") ? s.hold : 0) "|"
                     . Integer(s.HasOwnProp("x") ? s.x : 0) "|"
-                    . Integer(s.HasOwnProp("y") ? s.y : 0)
+                    . Integer(s.HasOwnProp("y") ? s.y : 0) "|"
+                    . MacroConfig.NormalizeButton(s.HasOwnProp("button") ? s.button : "Left")
                 IniWrite(line, path, sec, "Step" si)
             }
         }
@@ -501,7 +522,8 @@ class MacroStore {
                     Integer(parts.Length >= 3 ? parts[3] : 50),
                     Integer(parts.Length >= 4 ? parts[4] : 0),
                     Integer(parts.Length >= 5 ? parts[5] : 0),
-                    Integer(parts.Length >= 6 ? parts[6] : 0)
+                    Integer(parts.Length >= 6 ? parts[6] : 0),
+                    parts.Length >= 7 ? parts[7] : "Left"
                 ))
             }
             this.macros.Push(m)

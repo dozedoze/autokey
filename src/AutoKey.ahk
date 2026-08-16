@@ -91,7 +91,8 @@ class AutoKeyApp {
         this.lbMacros.OnEvent("Change", (*) => this._OnSelectMacro())
 
         g.AddButton("xm w76", "新建").OnEvent("Click", (*) => this._NewMacro())
-        g.AddButton("x+8 w76", "删除").OnEvent("Click", (*) => this._DeleteMacro())
+        g.AddButton("x+8 w76", "复制").OnEvent("Click", (*) => this._CopyMacro())
+        g.AddButton("xm w160", "删除").OnEvent("Click", (*) => this._DeleteMacro())
         g.AddButton("xm w160", "导入旧 ini…").OnEvent("Click", (*) => this._ImportIni())
 
         ; ── 右侧：编辑区 ──
@@ -234,18 +235,9 @@ class AutoKeyApp {
         choose := 1
         want := selectId != "" ? selectId : this.store.activeId
         for i, m in this.store.macros {
-            label := m.name
+            label := this._MacroListLabel(m)
             running := this._IsRunnerActive(m.id)
             mark .= running ? "1" : "0"
-            if running
-                label := "▶ " label
-            ; 同 exe 多套时在列表里带上标题，方便区分
-            if (m.targetExe != "" && this._CountExe(m.targetExe) > 1) {
-                tip := m.targetTitle != "" ? m.targetTitle : m.targetExe
-                if (m.targetIndex > 0)
-                    tip .= " #" m.targetIndex
-                label .= "  [" tip "]"
-            }
             names.Push(label)
             if (m.id = want)
                 choose := i
@@ -270,18 +262,42 @@ class AutoKeyApp {
             this._ReloadMacroList(this.store.activeId)
     }
 
-    _CountExe(exe) {
-        n := 0
-        want := StrLower(exe)
-        for m in this.store.macros {
-            if (StrLower(m.targetExe) = want)
-                n++
-        }
-        return n
-    }
-
     _IsRunnerActive(id) {
         return this.runners.Has(id) && this.runners[id].IsRunning
+    }
+
+    /** 列表显示：名称保持用户输入，窗口信息只作为后缀标识 */
+    _MacroListLabel(m) {
+        label := m.name
+        if this._IsRunnerActive(m.id)
+            label := "▶ " label
+        tip := this._WindowTip(m)
+        if (tip != "")
+            label .= "  [" tip "]"
+        return label
+    }
+
+    /** 目标窗口的简短标识，不写回名称字段 */
+    _WindowTip(m) {
+        if (m.targetHwnd) {
+            title := ""
+            try title := WinGetTitle("ahk_id " m.targetHwnd)
+            tip := this._TitleHint(title)
+            if (tip = "")
+                tip := m.targetExe != "" ? m.targetExe : ("窗口 " m.targetHwnd)
+            if (m.targetIndex > 0)
+                tip .= " #" m.targetIndex
+            return tip
+        }
+        if (m.targetIndex > 0) {
+            tip := m.targetExe != "" ? m.targetExe : "窗口"
+            return tip " #" m.targetIndex
+        }
+        if (m.targetTitle != "")
+            return m.targetTitle
+        if (m.targetExe != "")
+            return m.targetExe
+        return ""
     }
 
     _OnSelectMacro() {
@@ -327,6 +343,21 @@ class AutoKeyApp {
         this._SetStatus("已新建: " name)
     }
 
+    _CopyMacro() {
+        src := this.store.Active()
+        if !src
+            return
+        m := src.Clone()
+        m.id := ""
+        m.name := this._UniqueName(src.name " 副本")
+        this.store.Add(m)
+        this._ReloadMacroList(m.id)
+        this._LoadActiveIntoUi()
+        this._SyncActiveRefs(false)
+        this._RebindAllHotkeys()
+        this._SetStatus("已复制: " m.name)
+    }
+
     _DeleteMacro() {
         if (this.store.macros.Length <= 1) {
             MsgBox("至少保留一套配置。", "AutoKey", "Icon!")
@@ -370,35 +401,22 @@ class AutoKeyApp {
     }
 
     /**
-     * 同 exe 多套配置时，自动用标题片段区分名称。
+     * 同 exe 多套且未区分窗口时给个提示；不改名称。
      */
-    _DistinguishSameAppName(m) {
+    _WarnIfSameAppAmbiguous(m) {
         if (m.targetExe = "")
             return
-        peers := []
+        peers := 0
         for other in this.store.macros {
             if (other.id = m.id)
                 continue
             if (StrLower(other.targetExe) = StrLower(m.targetExe))
-                peers.Push(other)
+                peers++
         }
-        if (peers.Length = 0)
+        if (peers = 0)
             return
-
-        ; 同进程多套配置又没有任何区分手段时提醒一下
         if (m.targetTitle = "" && !m.targetHwnd && m.targetIndex <= 0)
             this._SetStatus("同进程已有其它配置：建议用「选窗口…」锁定，或填「窗口 #」区分")
-
-        tip := m.targetTitle != "" ? m.targetTitle : (m.targetIndex > 0 ? "#" m.targetIndex : m.targetExe)
-        ; 名称里尚无区分信息则追加
-        if !InStr(m.name, tip) && !InStr(m.name, "[") {
-            base := RegExReplace(m.name, "\s*[\[\(].*$", "")
-            base := Trim(base)
-            if (base = "")
-                base := "配置"
-            m.name := this._UniqueName(base " [" tip "]", m.id)
-            this.edName.Value := m.name
-        }
     }
 
     _ImportIni() {
@@ -478,7 +496,9 @@ class AutoKeyApp {
     _StepContent(s) {
         switch s.kind {
             case "sleep": return s.delay " ms"
-            case "click": return "(" s.x ", " s.y ")"
+            case "click":
+                btn := MacroConfig.NormalizeButton(s.HasOwnProp("button") ? s.button : "Left")
+                return (btn = "Right" ? "右键 " : "左键 ") "(" s.x ", " s.y ")"
             default: return s.key
         }
     }
@@ -541,7 +561,7 @@ class AutoKeyApp {
             return 0
         }
         m.name := this._UniqueName(m.name, m.id)
-        this._DistinguishSameAppName(m)
+        this._WarnIfSameAppAmbiguous(m)
         this.store.ReplaceActive(m)
         this._ReloadMacroList(m.id)
         this._SyncActiveRefs(true)
@@ -787,6 +807,7 @@ class AutoKeyApp {
         edDelay := ""
         edHold := ""
         edPoint := ""
+        ddlButton := ""
         pickedX := Integer(s.x)
         pickedY := Integer(s.y)
         hasPoint := isEdit && kind = "click"
@@ -808,6 +829,9 @@ class AutoKeyApp {
                 pointText := hasPoint ? "X=" pickedX "，Y=" pickedY : "尚未拾取"
                 edPoint := d.AddEdit("w240 ReadOnly", pointText)
                 d.AddButton("w240", "拾取坐标…").OnEvent("Click", PickPoint)
+                d.AddText(, "鼠标按键")
+                ddlButton := d.AddDropDownList("w240", ["左键", "右键"])
+                ddlButton.Choose(MacroConfig.NormalizeButton(s.button) = "Right" ? 2 : 1)
                 d.AddText(, "执行后延迟 ms")
                 edDelay := d.AddEdit("w240 Number", s.delay)
         }
@@ -825,7 +849,7 @@ class AutoKeyApp {
         }
 
         OnOk(*) {
-            step := this._BuildStepFromDialog(kind, edKey, edDelay, edHold, pickedX, pickedY, hasPoint)
+            step := this._BuildStepFromDialog(kind, edKey, edDelay, edHold, pickedX, pickedY, hasPoint, ddlButton)
             if !step
                 return
             result := step
@@ -845,7 +869,7 @@ class AutoKeyApp {
         return result
     }
 
-    _BuildStepFromDialog(kind, edKey, edDelay, edHold, x, y, hasPoint := false) {
+    _BuildStepFromDialog(kind, edKey, edDelay, edHold, x, y, hasPoint := false, ddlButton := "") {
         delay := Integer(edDelay.Value || 50)
         if (kind = "sleep")
             return MacroConfig.NewStep("sleep", "", delay)
@@ -854,7 +878,8 @@ class AutoKeyApp {
                 MsgBox("请先拾取点击位置。", "AutoKey", "Icon!")
                 return ""
             }
-            return MacroConfig.NewStep("click", "", delay, 0, x, y)
+            button := (ddlButton && ddlButton.Value = 2) ? "Right" : "Left"
+            return MacroConfig.NewStep("click", "", delay, 0, x, y, button)
         }
         key := Trim(edKey.Value)
         if (key = "") {
@@ -989,13 +1014,18 @@ class AutoKeyApp {
         this.edWinIndex.Value := index
         this._lockHwnd := hwnd + 0
         this._UpdateLockText()
+        this._SaveTargetFields(exe, "", "", index, hwnd)
+        this._ReloadMacroList(this.store.activeId)
+    }
 
+    /** 只更新目标窗口字段，不改配置名称 */
+    _SaveTargetFields(exe, title, winClass, index, hwnd) {
         m := this.store.Active()
         m.targetExe := exe
-        m.targetTitle := ""
-        m.targetClass := ""
-        m.targetIndex := index
-        m.targetHwnd := hwnd + 0
+        m.targetTitle := title
+        m.targetClass := winClass
+        m.targetIndex := Integer(index)
+        m.targetHwnd := Integer(hwnd)
         this.store.Save()
     }
 
@@ -1082,26 +1112,17 @@ class AutoKeyApp {
             }
             exe := WinGetProcessName(hwnd)
             title := WinGetTitle(hwnd)
-            this.edExe.Value := exe
-            ; 同进程多窗口用标题关键字区分；截一段稳定前缀
             tip := this._TitleHint(title)
+            index := this._IndexOfWindow(exe, hwnd)
+            this.edExe.Value := exe
             this.edTitle.Value := tip
             this.edClass.Value := ""
-            ; 多开时标题往往一模一样，直接把句柄也锁上才靠谱
             this._lockHwnd := hwnd + 0
-            this.edWinIndex.Value := this._IndexOfWindow(exe, hwnd)
+            this.edWinIndex.Value := index
             this._UpdateLockText()
-
-            ; 名称自动带上区分信息
-            base := Trim(this.edName.Value)
-            if (base = "" || base = "新配置" || base = "连发" || base = "未命名")
-                base := StrReplace(exe, ".exe", "")
-            if (tip != "")
-                this.edName.Value := this._UniqueName(base " [" tip "]", this.store.activeId)
-            else
-                this.edName.Value := this._UniqueName(base, this.store.activeId)
-
-            this._SetStatus("已锁定窗口 " hwnd "（" exe "，第 " this.edWinIndex.Value " 个）— 后台发送，无需聚焦")
+            this._SaveTargetFields(exe, tip, "", index, hwnd)
+            this._ReloadMacroList(this.store.activeId)
+            this._SetStatus("已锁定窗口 " hwnd "（" exe "，第 " index " 个）— 名称不变，列表后缀标识")
         } catch as e {
             this._SetStatus("获取失败: " e.Message)
         }
@@ -1167,12 +1188,16 @@ class AutoKeyApp {
             this.edExe.Value := sel.exe
             this.edWinIndex.Value := row
             this._UpdateLockText()
+            this._SaveTargetFields(sel.exe, Trim(this.edTitle.Value), Trim(this.edClass.Value), row, sel.hwnd)
+            this._ReloadMacroList(this.store.activeId)
             this._SetStatus("已锁定窗口 " sel.hwnd "：" sel.title)
             d.Destroy()
         }
         OnUnlock(*) {
             this._lockHwnd := 0
             this._UpdateLockText()
+            this._SaveTargetFields(Trim(this.edExe.Value), Trim(this.edTitle.Value), Trim(this.edClass.Value), Integer(this.edWinIndex.Value || 0), 0)
+            this._ReloadMacroList(this.store.activeId)
             this._SetStatus("已取消窗口锁定，按「窗口 #」序号匹配")
             d.Destroy()
         }

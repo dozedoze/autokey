@@ -127,8 +127,9 @@ class Sequencer {
             case "sleep":
                 return Integer(step.delay)
             case "click":
+                button := MacroConfig.NormalizeButton(step.HasOwnProp("button") ? step.button : "Left")
                 if (this.target.sendMode = "controlsend") {
-                    ControlClick("x" step.x " y" step.y, "ahk_id " hwnd, , "Left", 1, "NA")
+                    ControlClick("x" step.x " y" step.y, "ahk_id " hwnd, , button, 1, "NA")
                 } else {
                     point := Buffer(8, 0)
                     NumPut("Int", Integer(step.x), point, 0)
@@ -138,7 +139,7 @@ class Sequencer {
                     screenX := NumGet(point, 0, "Int")
                     screenY := NumGet(point, 4, "Int")
                     CoordMode "Mouse", "Screen"
-                    Click screenX, screenY
+                    Click screenX, screenY, button
                 }
                 return Integer(step.delay)
             default:
