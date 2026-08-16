@@ -952,6 +952,7 @@ class AutoKeyApp {
         cancelPick := (*) => this._pickCancelled := true
         clickHookOn := false
         escapeHookOn := false
+        cameraNoiseBlocked := false
 
         try {
             this._UnbindHotkeys()
@@ -962,6 +963,9 @@ class AutoKeyApp {
             clickHookOn := true
             Hotkey "*Escape", cancelPick, "On"
             escapeHookOn := true
+            ; 拾取时游戏常在前台：屏蔽滚轮/中键，否则一碰就缩放镜头
+            this._BlockCameraNoise(true)
+            cameraNoiseBlocked := true
 
             crossCursor := DllCall("LoadCursor", "Ptr", 0, "Ptr", 32515, "Ptr")
             thisPid := DllCall("GetCurrentProcessId", "UInt")
@@ -969,7 +973,7 @@ class AutoKeyApp {
             loop {
                 MouseGetPos(&screenX, &screenY, &hoverHwnd)
                 DllCall("SetCursor", "Ptr", crossCursor)
-                ToolTip("十字准星拾取：移动到目标位置后单击`n屏幕坐标 " screenX ", " screenY "　Esc 取消", screenX + 18, screenY + 18)
+                ToolTip("十字准星拾取：移到目标后左键确认（已屏蔽滚轮）`n屏幕坐标 " screenX ", " screenY "　Esc 取消", screenX + 18, screenY + 18)
 
                 if this._pickCancelled {
                     KeyWait "Escape"
@@ -1032,6 +1036,8 @@ class AutoKeyApp {
                 KeyWait "Escape"
                 try Hotkey "*Escape", "Off"
             }
+            if cameraNoiseBlocked
+                this._BlockCameraNoise(false)
             ToolTip()
             arrowCursor := DllCall("LoadCursor", "Ptr", 0, "Ptr", 32512, "Ptr")
             DllCall("SetCursor", "Ptr", arrowCursor)
@@ -1049,6 +1055,22 @@ class AutoKeyApp {
         else
             this._SetStatus("已取消坐标拾取")
         return result
+    }
+
+    /** 拾取时屏蔽滚轮/中键，避免游戏镜头被缩放 */
+    _BlockCameraNoise(enable) {
+        nop := AutoKeyApp._Noop
+        for key in ["WheelUp", "WheelDown", "WheelLeft", "WheelRight", "MButton"] {
+            try {
+                if enable
+                    Hotkey("*" key, nop, "On")
+                else
+                    Hotkey("*" key, "Off")
+            }
+        }
+    }
+
+    static _Noop(*) {
     }
 
     _BindPickedWindow(hwnd) {

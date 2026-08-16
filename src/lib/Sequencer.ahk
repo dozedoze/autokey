@@ -144,10 +144,12 @@ class Sequencer {
     /**
      * 真实鼠标点击（对游戏更有效）。
      * 通过全局门闩排队，多套配置同时跑时轮流点各自窗口，不会两只“手”互抢乱点。
+     * 点击期间屏蔽滚轮/中键，避免游戏把杂讯当成拉镜头。
      */
     _RealClick(hwnd, clientX, clientY, button := "Left") {
         if !this._AcquireMouse()
             return
+        wheelBlocked := false
         try {
             point := Buffer(8, 0)
             NumPut("Int", clientX, point, 0)
@@ -159,6 +161,10 @@ class Sequencer {
 
             if !WinExist("ahk_id " hwnd)
                 throw Error("目标窗口已关闭")
+
+            this._BlockCameraNoise(true)
+            wheelBlocked := true
+
             try {
                 WinActivate("ahk_id " hwnd)
                 WinWaitActive("ahk_id " hwnd, , 0.25)
@@ -171,13 +177,39 @@ class Sequencer {
                 screenY := NumGet(point, 4, "Int")
             }
 
+            ; 先挪到目标再单独点按键，避免 Click x y Left 被个别环境误解析
             CoordMode "Mouse", "Screen"
-            Click screenX, screenY, button
-            ; 给目标一点点处理时间，再交给下一扇窗口
+            MouseMove screenX, screenY, 0
+            Sleep 15
+            if (button = "Right")
+                Click "Right"
+            else
+                Click "Left"
             Sleep 30
         } finally {
+            if wheelBlocked
+                this._BlockCameraNoise(false)
             this._ReleaseMouse()
         }
+    }
+
+    /**
+     * 屏蔽滚轮与中键：游戏常把它们绑成缩放镜头；
+     * 激活窗口 / 模拟点击时驱动或系统偶发会吐出滚轮消息。
+     */
+    _BlockCameraNoise(enable) {
+        nop := Sequencer._Noop
+        for key in ["WheelUp", "WheelDown", "WheelLeft", "WheelRight", "MButton"] {
+            try {
+                if enable
+                    Hotkey("*" key, nop, "On")
+                else
+                    Hotkey("*" key, "Off")
+            }
+        }
+    }
+
+    static _Noop(*) {
     }
 
     /** @returns {Integer} 1=拿到锁 0=已停止/取消 */
