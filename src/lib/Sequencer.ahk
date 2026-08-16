@@ -20,6 +20,7 @@ class Sequencer {
         this._steps := []
         this._stepIndex := 1
         this._loopsDone := 0
+        this._hasExecutedStep := false
         this._tickFn := this._Tick.Bind(this)
     }
 
@@ -29,6 +30,9 @@ class Sequencer {
     IsPaused {
         get => this.paused
     }
+    HasExecutedStep {
+        get => this._hasExecutedStep
+    }
 
     Start() {
         if this.running
@@ -36,6 +40,7 @@ class Sequencer {
         this.running := true
         this.paused := false
         this._stopRequested := false
+        this._hasExecutedStep := false
         this._steps := this.cfg.HasMethod("EffectiveSteps") ? this.cfg.EffectiveSteps() : this.cfg.steps
         if (this._steps.Length = 0) {
             this.running := false
@@ -88,6 +93,7 @@ class Sequencer {
         step := this._steps[this._stepIndex]
         try {
             waitMs := this._ExecStep(step, hwnd)
+            this._hasExecutedStep := true
         } catch as e {
             ; 目标窗口可能刚被关闭：定时器线程里不能抛未捕获异常，等下一轮重找
             this._Notify("发送失败(" e.Message ")，重试中…")

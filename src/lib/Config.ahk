@@ -313,6 +313,9 @@ class MacroStore {
         this.path := this._DataPath()
         this.macros := []      ; MacroConfig[]
         this.activeId := ""
+        ; 全局热键（不属于某一套配置）
+        this.startSelectedHotkey := "^F9"
+        this.stopAllHotkey := "F12"
         this._Load()
         if (this.macros.Length = 0)
             this._SeedDefaults()
@@ -539,6 +542,8 @@ class MacroStore {
 
     _WriteIni(path) {
         IniWrite(this.activeId, path, "App", "ActiveId")
+        IniWrite(this.startSelectedHotkey, path, "App", "StartSelectedHotkey")
+        IniWrite(this.stopAllHotkey, path, "App", "StopAllHotkey")
         ids := ""
         for i, m in this.macros {
             ids .= (i = 1 ? "" : "|") m.id
@@ -590,6 +595,12 @@ class MacroStore {
             return
 
         this.activeId := IniRead(path, "App", "ActiveId", "")
+        this.startSelectedHotkey := IniRead(path, "App", "StartSelectedHotkey", "^F9")
+        this.stopAllHotkey := IniRead(path, "App", "StopAllHotkey", "F12")
+        if (this.startSelectedHotkey = "ERROR")
+            this.startSelectedHotkey := "^F9"
+        if (this.stopAllHotkey = "ERROR")
+            this.stopAllHotkey := "F12"
         idsRaw := IniRead(path, "App", "Ids", "")
         if (idsRaw = "" || idsRaw = "ERROR")
             return

@@ -56,9 +56,16 @@ class AutoKeyApp {
         this._capturing := false
         this._runMark := ""
         this._lockHwnd := 0
+        this._batchStarting := false
+        this._batchQueue := []
+        this._batchIndex := 1
+        this._batchWaitId := ""
+        this._batchStarted := 0
+        this._batchTickFn := this._BatchStartTick.Bind(this)
 
         this._InitTray()
         this._BuildGui()
+        this._LoadGlobalHotkeysIntoUi()
         this._ReloadMacroList()
         this._LoadActiveIntoUi()
         this._ApplyFromUi(false)
@@ -71,6 +78,7 @@ class AutoKeyApp {
         A_TrayMenu.Add()
         A_TrayMenu.Add("开始当前", (*) => this.Start())
         A_TrayMenu.Add("停止当前", (*) => this.Stop())
+        A_TrayMenu.Add("依次启动选中", (*) => this.StartSelected())
         A_TrayMenu.Add("全部停止", (*) => this.StopAll())
         A_TrayMenu.Add("暂停/继续当前", (*) => this.TogglePause())
         A_TrayMenu.Add()
@@ -86,7 +94,7 @@ class AutoKeyApp {
 
         ; ── 左侧：多套配置 ──
         g.AddText("xm w160 Section", "配置方案")
-        this.lbMacros := g.AddListBox("xm w160 r18")
+        this.lbMacros := g.AddListBox("xm w160 r18 Multi")
         this.lbMacros.OnEvent("Change", (*) => this._OnSelectMacro())
 
         g.AddButton("xm w76", "新建").OnEvent("Click", (*) => this._NewMacro())
@@ -158,7 +166,7 @@ class AutoKeyApp {
         this.tabMode.UseTab(0)
 
         ; 明确放在 Tab 底部之后，避免被 Tab 遮挡
-        g.AddGroupBox("x" tabX " y" (tabY + tabH + 10) " w540 h88", "循环与热键")
+        g.AddGroupBox("x" tabX " y" (tabY + tabH + 10) " w540 h118", "循环与热键")
         this.chkLoop := g.AddCheckbox("xp+12 yp+22 Checked", "循环")
         g.AddText("x+8", "轮间隔 ms")
         this.edLoopDelay := g.AddEdit("x+6 w60 Number", "200")
@@ -174,6 +182,14 @@ class AutoKeyApp {
         g.AddText("x+8", "暂停")
         this.edPauseHk := g.AddEdit("x+6 w56", "F8")
         g.AddButton("x+4 w44", "捕捉").OnEvent("Click", (*) => this._CaptureInto("pause"))
+
+        g.AddText("xm+184 y+10 cGray", "全局")
+        g.AddText("x+8", "依次启动")
+        this.edStartSelectedHk := g.AddEdit("x+6 w56", "^F9")
+        g.AddButton("x+4 w44", "捕捉").OnEvent("Click", (*) => this._CaptureInto("startSelected"))
+        g.AddText("x+8", "全部停止")
+        this.edStopAllHk := g.AddEdit("x+6 w56", "F12")
+        g.AddButton("x+4 w44", "捕捉").OnEvent("Click", (*) => this._CaptureInto("stopAll"))
 
         g.AddGroupBox("x" tabX " y+14 w540 h110", "目标窗口（可留空 = 当前前台）")
         g.AddText("xp+12 yp+22", "进程 exe")
@@ -202,6 +218,8 @@ class AutoKeyApp {
         this.btnPause.OnEvent("Click", (*) => this.TogglePause())
         this.btnStopAll := g.AddButton("x+8 w88", "全部停止")
         this.btnStopAll.OnEvent("Click", (*) => this.StopAll())
+        this.btnStartSelected := g.AddButton("x+8 w96", "依次启动选中")
+        this.btnStartSelected.OnEvent("Click", (*) => this.StartSelected())
 
         g.AddText("xm+172 y+10 cGray w540", "提示：点「选择目标窗口…」后 AutoKey 会最小化，点击目标即自动恢复；仅打开列表时才监听窗口。")
 
@@ -216,13 +234,14 @@ class AutoKeyApp {
 
     ; ───────── 列表 / 切换 ─────────
 
-    _ReloadMacroList(selectId := "") {
+    _ReloadMacroList(selectId := "", keepSelection := false) {
         ; Delete 与 Add 之间若被运行中的定时器线程打断并重入，列表会被重复填充，
         ; 之后点击靠后的重复项就会索引越界，所以整段必须不可中断。
         prevCritical := A_IsCritical
         prevLoading := this._loadingUi
         Critical "On"
         this._loadingUi := true
+        selectedIds := keepSelection ? this._GetSelectedMacroIds() : []
 
         names := []
         mark := ""
@@ -239,7 +258,10 @@ class AutoKeyApp {
         this.lbMacros.Delete()
         if (names.Length) {
             this.lbMacros.Add(names)
-            this.lbMacros.Choose(choose)
+            if (selectedIds.Length)
+                this._SelectMacroIds(selectedIds, choose)
+            else
+                this.lbMacros.Choose(choose)
         }
         this._runMark := mark
 
@@ -253,11 +275,47 @@ class AutoKeyApp {
         for m in this.store.macros
             mark .= this._IsRunnerActive(m.id) ? "1" : "0"
         if (mark != this._runMark)
-            this._ReloadMacroList(this.store.activeId)
+            this._ReloadMacroList(this.store.activeId, true)
     }
 
     _IsRunnerActive(id) {
         return this.runners.Has(id) && this.runners[id].IsRunning
+    }
+
+    /** 返回列表中勾选的配置 ID，顺序与列表一致 */
+    _GetSelectedMacroIds() {
+        ids := []
+        if !this.HasOwnProp("lbMacros")
+            return ids
+        for i, m in this.store.macros {
+            selected := DllCall("SendMessage", "Ptr", this.lbMacros.Hwnd
+                , "UInt", 0x0187, "Ptr", i - 1, "Ptr", 0, "Int") ; LB_GETSEL
+            if (selected > 0)
+                ids.Push(m.id)
+        }
+        return ids
+    }
+
+    /** 恢复多选项，并把 caret 放回当前编辑配置 */
+    _SelectMacroIds(ids, caretIndex := 0) {
+        selected := Map()
+        for id in ids
+            selected[id] := true
+        for i, m in this.store.macros {
+            if selected.Has(m.id)
+                DllCall("SendMessage", "Ptr", this.lbMacros.Hwnd
+                    , "UInt", 0x0185, "Ptr", 1, "Ptr", i - 1, "Int") ; LB_SETSEL
+        }
+        if (caretIndex > 0)
+            DllCall("SendMessage", "Ptr", this.lbMacros.Hwnd
+                , "UInt", 0x019E, "Ptr", caretIndex - 1, "Ptr", 0, "Int") ; LB_SETCARETINDEX
+    }
+
+    /** Extended ListBox 的 Value 是多选数组；当前编辑项取键盘焦点所在行 */
+    _FocusedMacroIndex() {
+        idx := DllCall("SendMessage", "Ptr", this.lbMacros.Hwnd
+            , "UInt", 0x019F, "Ptr", 0, "Ptr", 0, "Int") ; LB_GETCARETINDEX
+        return idx >= 0 ? idx + 1 : 0
     }
 
     /** 列表显示：名称保持用户输入，窗口信息只作为后缀标识 */
@@ -306,7 +364,7 @@ class AutoKeyApp {
     _OnSelectMacro() {
         if this._loadingUi
             return
-        idx := this.lbMacros.Value
+        idx := this._FocusedMacroIndex()
         if (idx < 1)
             return
         if (idx > this.store.macros.Length) {
@@ -439,6 +497,16 @@ class AutoKeyApp {
     }
 
     ; ───────── UI ↔ 配置 ─────────
+
+    _LoadGlobalHotkeysIntoUi() {
+        this.edStartSelectedHk.Value := this.store.startSelectedHotkey
+        this.edStopAllHk.Value := this.store.stopAllHotkey
+    }
+
+    _ApplyGlobalHotkeysFromUi() {
+        this.store.startSelectedHotkey := Trim(this.edStartSelectedHk.Value)
+        this.store.stopAllHotkey := Trim(this.edStopAllHk.Value)
+    }
 
     _LoadActiveIntoUi() {
         prevLoading := this._loadingUi
@@ -615,6 +683,7 @@ class AutoKeyApp {
         }
         m.name := this._UniqueName(m.name, m.id)
         this._WarnIfSameAppAmbiguous(m)
+        this._ApplyGlobalHotkeysFromUi()
         this.store.ReplaceActive(m)
         this._ReloadMacroList(m.id)
         this._SyncActiveRefs(true)
@@ -1184,6 +1253,8 @@ class AutoKeyApp {
             case "start": this.edStartHk.Value := key
             case "stop": this.edStopHk.Value := key
             case "pause": this.edPauseHk.Value := key
+            case "startSelected": this.edStartSelectedHk.Value := key
+            case "stopAll": this.edStopAllHk.Value := key
         }
         this._SetStatus("已捕捉: " key)
     }
@@ -1461,6 +1532,9 @@ class AutoKeyApp {
     _RebindAllHotkeys() {
         this._UnbindHotkeys()
         used := Map()
+        ; 全局热键优先绑定，避免被某套配置的同名热键抢占
+        this._TryBind(this.store.startSelectedHotkey, used, (*) => this.StartSelected())
+        this._TryBind(this.store.stopAllHotkey, used, (*) => this.StopAll())
         for m in this.store.macros {
             mid := m.id
             this._TryBind(m.startHotkey, used, (*) => this.StartMacro(mid))
@@ -1501,6 +1575,72 @@ class AutoKeyApp {
         this.StartMacro(this.store.activeId)
     }
 
+    /** 按列表顺序启动选中项；每项执行完第一步后才启动下一项 */
+    StartSelected() {
+        ids := this._GetSelectedMacroIds()
+        if (ids.Length = 0) {
+            MsgBox("请先在左侧列表中选择至少一套配置。`n可用 Ctrl 或 Shift 多选。", "AutoKey", "Icon!")
+            return
+        }
+        if this._batchStarting {
+            this._SetStatus("选中配置正在依次启动，请稍候")
+            return
+        }
+        this._batchQueue := ids.Clone()
+        this._batchIndex := 1
+        this._batchWaitId := ""
+        this._batchStarted := 0
+        this._batchStarting := true
+        this._SetStatus("准备依次启动 " ids.Length " 个配置…")
+        this._BatchStartTick()
+    }
+
+    _BatchStartTick() {
+        if !this._batchStarting
+            return
+
+        ; 前一项至少成功执行了一步（包括首步点击）后，才轮到下一项。
+        if (this._batchWaitId != "") {
+            id := this._batchWaitId
+            if (this.runners.Has(id)
+                && this.runners[id].IsRunning
+                && !this.runners[id].HasExecutedStep) {
+                SetTimer(this._batchTickFn, -50)
+                return
+            }
+            this._batchWaitId := ""
+        }
+
+        while (this._batchIndex <= this._batchQueue.Length) {
+            id := this._batchQueue[this._batchIndex]
+            this._batchIndex++
+            if this._IsRunnerActive(id)
+                continue
+
+            this.StartMacro(id)
+            this._SelectMacroIds(this._batchQueue, this._FocusedMacroIndex())
+            if this._IsRunnerActive(id) {
+                this._batchStarted++
+                this._batchWaitId := id
+                SetTimer(this._batchTickFn, -50)
+                return
+            }
+        }
+
+        total := this._batchQueue.Length
+        started := this._batchStarted
+        this._CancelBatchStart()
+        this._SetStatus("已依次处理 " total " 个配置，新启动 " started " 个")
+    }
+
+    _CancelBatchStart() {
+        this._batchStarting := false
+        this._batchQueue := []
+        this._batchIndex := 1
+        this._batchWaitId := ""
+        try SetTimer(this._batchTickFn, 0)
+    }
+
     Stop() {
         this.StopMacro(this.store.activeId)
     }
@@ -1528,24 +1668,25 @@ class AutoKeyApp {
         seq.cfg := m
         seq.target := WindowTarget(m)
         seq.Start()
-        this._ReloadMacroList(this.store.activeId)
+        this._ReloadMacroList(this.store.activeId, true)
         this._RefreshStatusBar()
     }
 
     StopMacro(id) {
         if this.runners.Has(id)
             this.runners[id].Stop()
-        this._ReloadMacroList(this.store.activeId)
+        this._ReloadMacroList(this.store.activeId, true)
         this._RefreshStatusBar()
     }
 
     StopAll() {
+        this._CancelBatchStart()
         ids := []
         for id in this.runners
             ids.Push(id)
         for id in ids
             try this.runners[id].Stop()
-        this._ReloadMacroList(this.store.activeId)
+        this._ReloadMacroList(this.store.activeId, true)
         this._SetStatus("已全部停止")
     }
 
