@@ -268,7 +268,7 @@ class AutoKeyApp {
 
     /** 列表显示：名称保持用户输入，窗口信息只作为后缀标识 */
     _MacroListLabel(m) {
-        label := m.name
+        label := this._CleanMacroName(m.name)
         if this._IsRunnerActive(m.id)
             label := "▶ " label
         tip := this._WindowTip(m)
@@ -277,26 +277,35 @@ class AutoKeyApp {
         return label
     }
 
-    /** 目标窗口的简短标识，不写回名称字段 */
+    /** 去掉历史上误写入名称的 [窗口] 后缀 */
+    _CleanMacroName(name) {
+        name := Trim(name)
+        ; 反复去掉末尾的 " [xxx]" / " (xxx)" 自动标识
+        loop 3 {
+            cleaned := RegExReplace(name, "\s*[\[\(][^\[\]\(\)]*[\]\)]\s*$", "")
+            cleaned := Trim(cleaned)
+            if (cleaned = "" || cleaned = name)
+                break
+            name := cleaned
+        }
+        return name != "" ? name : "未命名"
+    }
+
+    /** 目标窗口的简短标识：只用进程/序号，不用窗口标题，避免看起来像改了名称 */
     _WindowTip(m) {
-        if (m.targetHwnd) {
-            title := ""
-            try title := WinGetTitle("ahk_id " m.targetHwnd)
-            tip := this._TitleHint(title)
-            if (tip = "")
-                tip := m.targetExe != "" ? m.targetExe : ("窗口 " m.targetHwnd)
-            if (m.targetIndex > 0)
-                tip .= " #" m.targetIndex
-            return tip
-        }
+        exe := m.targetExe != "" ? m.targetExe : ""
         if (m.targetIndex > 0) {
-            tip := m.targetExe != "" ? m.targetExe : "窗口"
-            return tip " #" m.targetIndex
+            if (exe != "")
+                return exe " #" m.targetIndex
+            return "#" m.targetIndex
         }
-        if (m.targetTitle != "")
-            return m.targetTitle
-        if (m.targetExe != "")
-            return m.targetExe
+        if (m.targetHwnd) {
+            if (exe != "")
+                return exe
+            return "已锁定"
+        }
+        if (exe != "")
+            return exe
         return ""
     }
 
@@ -442,6 +451,12 @@ class AutoKeyApp {
         this._loadingUi := true
         m := this.store.Active()
         m.EnsureKeys()
+        ; 清理历史误写入的窗口后缀，名称字段只保留用户自己的名字
+        cleanName := this._CleanMacroName(m.name)
+        if (cleanName != m.name) {
+            m.name := cleanName
+            this.store.Save()
+        }
         this.edName.Value := m.name
         this.tabMode.Value := (m.mode = "sequence") ? 2 : 1
         this.edSingleKey.Value := ""
@@ -513,6 +528,7 @@ class AutoKeyApp {
     _CollectFromUi() {
         m := this.store.Active().Clone()
         m.name := Trim(this.edName.Value)
+        m.name := this._CleanMacroName(m.name)
         if (m.name = "")
             m.name := "未命名"
         m.mode := this._IsSingleMode() ? "single" : "sequence"
@@ -1026,6 +1042,12 @@ class AutoKeyApp {
         m.targetClass := winClass
         m.targetIndex := Integer(index)
         m.targetHwnd := Integer(hwnd)
+        ; 顺带清掉名称里历史残留的 [窗口标题]，绝不写入新窗口名
+        cleanName := this._CleanMacroName(m.name)
+        if (cleanName != m.name) {
+            m.name := cleanName
+            this.edName.Value := cleanName
+        }
         this.store.Save()
     }
 
@@ -1111,18 +1133,16 @@ class AutoKeyApp {
                 return
             }
             exe := WinGetProcessName(hwnd)
-            title := WinGetTitle(hwnd)
-            tip := this._TitleHint(title)
             index := this._IndexOfWindow(exe, hwnd)
             this.edExe.Value := exe
-            this.edTitle.Value := tip
+            this.edTitle.Value := ""
             this.edClass.Value := ""
             this._lockHwnd := hwnd + 0
             this.edWinIndex.Value := index
             this._UpdateLockText()
-            this._SaveTargetFields(exe, tip, "", index, hwnd)
+            this._SaveTargetFields(exe, "", "", index, hwnd)
             this._ReloadMacroList(this.store.activeId)
-            this._SetStatus("已锁定窗口 " hwnd "（" exe "，第 " index " 个）— 名称不变，列表后缀标识")
+            this._SetStatus("已锁定窗口 " hwnd "（" exe "，第 " index " 个）")
         } catch as e {
             this._SetStatus("获取失败: " e.Message)
         }
