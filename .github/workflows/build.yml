@@ -39,8 +39,9 @@ jobs:
             Select-Object -First 1 -ExpandProperty FullName
           if (-not $base) { throw "AutoHotkey64.exe not found in $tools" }
           if (-not $comp) { throw "Ahk2Exe.exe not found in $tools" }
-          "AHK_BASE=$base" | Out-File -FilePath $env:GITHUB_ENV -Append
-          "AHK2EXE=$comp" | Out-File -FilePath $env:GITHUB_ENV -Append
+          # utf8：避免 Out-File 默认编码把 GITHUB_ENV 写坏
+          Add-Content -Path $env:GITHUB_ENV -Value "AHK_BASE=$base" -Encoding utf8
+          Add-Content -Path $env:GITHUB_ENV -Value "AHK2EXE=$comp" -Encoding utf8
           Write-Host "Base=$base"
           Write-Host "Compiler=$comp"
 
@@ -48,8 +49,26 @@ jobs:
         shell: pwsh
         run: |
           $src = Join-Path $env:GITHUB_WORKSPACE "src\AutoKey.ahk"
-          & $env:AHK_BASE /ErrorStdOut /validate $src
-          if ($LASTEXITCODE -ne 0) { throw "syntax check failed (exit $LASTEXITCODE)" }
+          if (-not $env:AHK_BASE -or -not (Test-Path -LiteralPath $env:AHK_BASE)) {
+            throw "AHK_BASE missing: '$env:AHK_BASE'"
+          }
+          $log = Join-Path $env:TEMP "ahk-validate.log"
+          if (Test-Path -LiteralPath $log) { Remove-Item -LiteralPath $log -Force }
+
+          # AutoHotkey64 是 GUI 子系统：直接 & 调用时 $LASTEXITCODE 常为 $null，
+          # 而 ($null -ne 0) 为真，会误报 "syntax check failed (exit )"。
+          # 经 cmd 重定向可拿到真实退出码，并把 /ErrorStdOut 的报错打进日志。
+          $ahk = $env:AHK_BASE
+          cmd.exe /c "`"$ahk`" /ErrorStdOut=UTF-8 /validate `"$src`" >`"$log`" 2>&1"
+          $code = $LASTEXITCODE
+          if (Test-Path -LiteralPath $log) {
+            $text = Get-Content -LiteralPath $log -Raw -ErrorAction SilentlyContinue
+            if ($text) { Write-Host $text }
+          }
+          if ($code -ne 0) {
+            throw "syntax check failed (exit $code)"
+          }
+          Write-Host "syntax OK"
 
       - name: Compile AutoKey.exe
         shell: pwsh
@@ -57,11 +76,20 @@ jobs:
           New-Item -ItemType Directory -Force -Path dist\configs | Out-Null
           $src = Join-Path $env:GITHUB_WORKSPACE "src\AutoKey.ahk"
           $out = Join-Path $env:GITHUB_WORKSPACE "dist\AutoKey.exe"
-          & $env:AHK2EXE /in $src /out $out /base $env:AHK_BASE /compress 2 /silent verbose
-          if (-not (Test-Path $out)) {
-            & $env:AHK2EXE /in $src /out $out /base $env:AHK_BASE /compress 0 /silent verbose
+          $log = Join-Path $env:TEMP "ahk2exe.log"
+          if (Test-Path -LiteralPath $log) { Remove-Item -LiteralPath $log -Force }
+
+          $ahk2exe = $env:AHK2EXE
+          $base = $env:AHK_BASE
+          cmd.exe /c "`"$ahk2exe`" /in `"$src`" /out `"$out`" /base `"$base`" /compress 2 /silent verbose >`"$log`" 2>&1"
+          if (-not (Test-Path -LiteralPath $out)) {
+            cmd.exe /c "`"$ahk2exe`" /in `"$src`" /out `"$out`" /base `"$base`" /compress 0 /silent verbose >>`"$log`" 2>&1"
           }
-          if (-not (Test-Path $out)) { throw "compile failed" }
+          if (Test-Path -LiteralPath $log) {
+            $text = Get-Content -LiteralPath $log -Raw -ErrorAction SilentlyContinue
+            if ($text) { Write-Host $text }
+          }
+          if (-not (Test-Path -LiteralPath $out)) { throw "compile failed (see Ahk2Exe log above)" }
           Copy-Item -Path "configs\*" -Destination "dist\configs\" -Force
           Get-Item $out | Format-List Name, Length, FullName
 

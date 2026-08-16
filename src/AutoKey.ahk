@@ -8,7 +8,6 @@ CoordMode "Mouse", "Screen"
 ;@Ahk2Exe-SetName AutoKey
 ;@Ahk2Exe-SetDescription 按键序列自动化（AutoHotkey v2）
 ;@Ahk2Exe-SetVersion 2.0.0
-;@Ahk2Exe-SetMainIcon
 ;@Ahk2Exe-ExeName AutoKey.exe
 
 #Include lib\Config.ahk
@@ -176,18 +175,13 @@ class AutoKeyApp {
         this.edPauseHk := g.AddEdit("x+6 w56", "F8")
         g.AddButton("x+4 w44", "捕捉").OnEvent("Click", (*) => this._CaptureInto("pause"))
 
-        g.AddGroupBox("x" tabX " y+14 w540 h146", "目标窗口（可留空 = 当前前台）")
+        g.AddGroupBox("x" tabX " y+14 w540 h110", "目标窗口（可留空 = 当前前台）")
         g.AddText("xp+12 yp+22", "进程 exe")
-        this.edExe := g.AddEdit("x+6 w300")
-        g.AddButton("x+6 w80", "取前台").OnEvent("Click", (*) => this._PickForeground())
-        g.AddText("xm+184 y+8", "标题包含")
-        this.edTitle := g.AddEdit("x+6 w200")
-        g.AddText("x+8", "类名")
-        this.edClass := g.AddEdit("x+6 w140")
+        this.edExe := g.AddEdit("x+6 w270")
+        g.AddButton("x+6 w112", "选择目标窗口…").OnEvent("Click", (*) => this._ChooseTargetWindow())
         g.AddText("xm+184 y+8", "窗口 #")
         this.edWinIndex := g.AddEdit("x+6 w44 Number", "0")
         g.AddText("x+6 cGray", "0=自动")
-        g.AddButton("x+8 w86", "选窗口…").OnEvent("Click", (*) => this._PickWindowFromList())
         this.txtLock := g.AddText("x+8 w250 cGray", "未锁定具体窗口")
         this.chkActivate := g.AddCheckbox("xm+184 y+8", "发送前激活")
         g.AddText("x+12", "发送模式")
@@ -209,7 +203,7 @@ class AutoKeyApp {
         this.btnStopAll := g.AddButton("x+8 w88", "全部停止")
         this.btnStopAll.OnEvent("Click", (*) => this.StopAll())
 
-        g.AddText("xm+172 y+10 cGray w540", "提示：多套配置可同时运行。同进程多窗口请填「标题包含」区分。默认后台 ControlSend，无需聚焦。")
+        g.AddText("xm+172 y+10 cGray w540", "提示：点「选择目标窗口…」后 AutoKey 会最小化，点击目标即自动恢复；仅打开列表时才监听窗口。")
 
         this.gui := g
         this._OnModeChange()
@@ -424,8 +418,8 @@ class AutoKeyApp {
         }
         if (peers = 0)
             return
-        if (m.targetTitle = "" && !m.targetHwnd && m.targetIndex <= 0)
-            this._SetStatus("同进程已有其它配置：建议用「选窗口…」锁定，或填「窗口 #」区分")
+        if (!m.targetHwnd && m.targetIndex <= 0)
+            this._SetStatus("同进程已有其它配置：请用「选择目标窗口…」锁定具体窗口")
     }
 
     _ImportIni() {
@@ -468,8 +462,6 @@ class AutoKeyApp {
         this.edStopHk.Value := m.stopHotkey
         this.edPauseHk.Value := m.pauseHotkey
         this.edExe.Value := m.targetExe
-        this.edTitle.Value := m.targetTitle
-        this.edClass.Value := m.targetClass
         this.edWinIndex.Value := Integer(m.targetIndex)
         this._lockHwnd := Integer(m.targetHwnd)
         this._UpdateLockText()
@@ -539,8 +531,8 @@ class AutoKeyApp {
         m.stopHotkey := Trim(this.edStopHk.Value) || "F7"
         m.pauseHotkey := Trim(this.edPauseHk.Value) || "F8"
         m.targetExe := Trim(this.edExe.Value)
-        m.targetTitle := Trim(this.edTitle.Value)
-        m.targetClass := Trim(this.edClass.Value)
+        m.targetTitle := ""
+        m.targetClass := ""
         m.targetIndex := Integer(this.edWinIndex.Value || 0)
         m.targetHwnd := Integer(this._lockHwnd)
         m.activate := this.chkActivate.Value ? 1 : 0
@@ -1025,21 +1017,19 @@ class AutoKeyApp {
         index := this._IndexOfWindow(exe, hwnd)
 
         this.edExe.Value := exe
-        this.edTitle.Value := ""
-        this.edClass.Value := ""
         this.edWinIndex.Value := index
         this._lockHwnd := hwnd + 0
         this._UpdateLockText()
-        this._SaveTargetFields(exe, "", "", index, hwnd)
+        this._SaveTargetFields(exe, index, hwnd)
         this._ReloadMacroList(this.store.activeId)
     }
 
     /** 只更新目标窗口字段，不改配置名称 */
-    _SaveTargetFields(exe, title, winClass, index, hwnd) {
+    _SaveTargetFields(exe, index, hwnd) {
         m := this.store.Active()
         m.targetExe := exe
-        m.targetTitle := title
-        m.targetClass := winClass
+        m.targetTitle := ""
+        m.targetClass := ""
         m.targetIndex := Integer(index)
         m.targetHwnd := Integer(hwnd)
         ; 顺带清掉名称里历史残留的 [窗口标题]，绝不写入新窗口名
@@ -1051,7 +1041,7 @@ class AutoKeyApp {
         this.store.Save()
     }
 
-    ; ───────── 捕捉按键 / 取前台 ─────────
+    ; ───────── 捕捉按键 / 选择目标窗口 ─────────
 
     _CaptureInto(which) {
         this._SetStatus("请按下要绑定的键…（Esc 取消）")
@@ -1119,35 +1109,6 @@ class AutoKeyApp {
         return "{" name "}"
     }
 
-    _PickForeground() {
-        this._SetStatus("3 秒内切换到目标窗口…")
-        Sleep 3000
-        hwnd := WinExist("A")
-        if !hwnd {
-            this._SetStatus("未获取到窗口")
-            return
-        }
-        try {
-            if (WinGetPID(hwnd) = DllCall("GetCurrentProcessId", "UInt")) {
-                this._SetStatus("取到的是 AutoKey 自己，请在 3 秒内切到目标程序")
-                return
-            }
-            exe := WinGetProcessName(hwnd)
-            index := this._IndexOfWindow(exe, hwnd)
-            this.edExe.Value := exe
-            this.edTitle.Value := ""
-            this.edClass.Value := ""
-            this._lockHwnd := hwnd + 0
-            this.edWinIndex.Value := index
-            this._UpdateLockText()
-            this._SaveTargetFields(exe, "", "", index, hwnd)
-            this._ReloadMacroList(this.store.activeId)
-            this._SetStatus("已锁定窗口 " hwnd "（" exe "，第 " index " 个）")
-        } catch as e {
-            this._SetStatus("获取失败: " e.Message)
-        }
-    }
-
     _UpdateLockText() {
         if !this._lockHwnd {
             this.txtLock.Value := "未锁定具体窗口"
@@ -1170,80 +1131,205 @@ class AutoKeyApp {
         return 0
     }
 
-    /** 列出候选窗口让用户直接点一个，多开时唯一可靠的区分方式 */
-    _PickWindowFromList() {
-        exe := Trim(this.edExe.Value)
-        wins := WindowTarget.ListWindows(exe)
-        if (wins.Length = 0) {
-            MsgBox(exe != "" ? "没找到 " exe " 的可见窗口。" : "没找到可见窗口。", "AutoKey", "Icon!")
-            return
-        }
-
+    /** 统一的目标窗口入口：实时窗口列表 + 最小化后直接点选 */
+    _ChooseTargetWindow() {
         d := Gui("+Owner" this.gui.Hwnd " +AlwaysOnTop", "选择目标窗口")
         d.SetFont("s9", "Segoe UI")
-        d.AddText(, "同一程序多开时，选中具体那个窗口（关闭后需重选）")
-        lv := d.AddListView("w620 r12", ["#", "窗口标题", "进程", "句柄", "类名"])
+        d.AddText("w520", "推荐让 AutoKey 最小化后直接点击目标；也可从下方列表选择。")
+        d.AddButton("w520 h36 Default", "最小化 AutoKey，然后点击目标窗口").OnEvent("Click", OnPick)
+        txtListStatus := d.AddText("w520 cGray", "仅在本窗口打开时监听；正在读取…")
+        lv := d.AddListView("w520 r12", ["#", "窗口标题", "进程", "句柄"])
         lv.ModifyCol(1, 34)
-        lv.ModifyCol(2, 300)
+        lv.ModifyCol(2, 280)
         lv.ModifyCol(3, 110)
         lv.ModifyCol(4, 80)
-        lv.ModifyCol(5, 90)
-        for i, w in wins
-            lv.Add(, i, w.title, w.exe, w.hwnd, w.cls)
-        if (this._lockHwnd) {
-            for i, w in wins {
-                if (w.hwnd = this._lockHwnd)
-                    lv.Modify(i, "Select Focus")
+
+        wins := []
+        lastSignature := ""
+        listening := false
+
+        StopListen(*) {
+            if listening {
+                SetTimer(RefreshList, 0)
+                listening := false
             }
         }
+        StartListen(*) {
+            if listening
+                return
+            RefreshList()
+            SetTimer(RefreshList, 700)
+            listening := true
+        }
 
+        RefreshList(*) {
+            if !WinExist("ahk_id " d.Hwnd) {
+                StopListen()
+                return
+            }
+            selectedHwnd := this._lockHwnd
+            row := lv.GetNext()
+            if (row && row <= wins.Length)
+                selectedHwnd := wins[row].hwnd
+
+            fresh := []
+            signature := ""
+            thisPid := DllCall("GetCurrentProcessId", "UInt")
+            for w in WindowTarget.ListWindows() {
+                try {
+                    if (WinGetPID("ahk_id " w.hwnd) = thisPid)
+                        continue
+                    fresh.Push(w)
+                    signature .= w.hwnd "|" w.exe "|" w.title "`n"
+                }
+            }
+            if (signature = lastSignature)
+                return
+
+            wins := fresh
+            lastSignature := signature
+            lv.Delete()
+            for i, w in wins {
+                lv.Add(, i, w.title, w.exe, w.hwnd)
+                if (w.hwnd = selectedHwnd)
+                    lv.Modify(i, "Select Focus Vis")
+            }
+            if (wins.Length = 0)
+                lv.Add(, "-", "没有找到可见窗口", "", "")
+            txtListStatus.Value := "列表打开中监听：当前 " wins.Length " 个可见窗口"
+        }
+
+        OnPick(*) {
+            StopListen()
+            pickedHwnd := this._PickTargetInteractively(d)
+            if !pickedHwnd {
+                StartListen()
+                return
+            }
+            this._BindTargetWindow(pickedHwnd)
+            d.Destroy()
+        }
         OnOk(*) {
             row := lv.GetNext()
-            if !row {
+            if (!row || row > wins.Length) {
                 MsgBox("请先选中一个窗口。", "AutoKey", "Icon!")
                 return
             }
             sel := wins[row]
-            this._lockHwnd := sel.hwnd
-            this.edExe.Value := sel.exe
-            this.edWinIndex.Value := row
-            this._UpdateLockText()
-            this._SaveTargetFields(sel.exe, Trim(this.edTitle.Value), Trim(this.edClass.Value), row, sel.hwnd)
-            this._ReloadMacroList(this.store.activeId)
-            this._SetStatus("已锁定窗口 " sel.hwnd "：" sel.title)
+            StopListen()
+            this._BindTargetWindow(sel.hwnd)
             d.Destroy()
         }
         OnUnlock(*) {
+            StopListen()
             this._lockHwnd := 0
             this._UpdateLockText()
-            this._SaveTargetFields(Trim(this.edExe.Value), Trim(this.edTitle.Value), Trim(this.edClass.Value), Integer(this.edWinIndex.Value || 0), 0)
+            this._SaveTargetFields(Trim(this.edExe.Value), Integer(this.edWinIndex.Value || 0), 0)
             this._ReloadMacroList(this.store.activeId)
             this._SetStatus("已取消窗口锁定，按「窗口 #」序号匹配")
             d.Destroy()
         }
         OnCancel(*) {
+            StopListen()
             d.Destroy()
         }
 
-        d.AddButton("w120 Default", "锁定这个窗口").OnEvent("Click", OnOk)
+        lv.OnEvent("DoubleClick", OnOk)
+        d.AddButton("w120", "选择列表窗口").OnEvent("Click", OnOk)
         d.AddButton("x+10 w100", "取消锁定").OnEvent("Click", OnUnlock)
         d.AddButton("x+10 w100", "关闭").OnEvent("Click", OnCancel)
         d.OnEvent("Close", OnCancel)
         hwnd := d.Hwnd
         d.Show()
+        StartListen()
         WinWaitClose("ahk_id " hwnd)
+        StopListen()
     }
 
-    _TitleHint(title) {
-        title := Trim(title)
-        if (title = "")
-            return ""
-        ; 取 " - " 前一段，或截前 16 字
-        if (p := InStr(title, " - "))
-            title := SubStr(title, 1, p - 1)
-        if (StrLen(title) > 16)
-            title := SubStr(title, 1, 16)
-        return title
+    _BindTargetWindow(hwnd) {
+        exe := WinGetProcessName("ahk_id " hwnd)
+        index := this._IndexOfWindow(exe, hwnd)
+        this.edExe.Value := exe
+        this.edWinIndex.Value := index
+        this._lockHwnd := hwnd + 0
+        this._UpdateLockText()
+        this._SaveTargetFields(exe, index, hwnd)
+        this._ReloadMacroList(this.store.activeId)
+        title := WinGetTitle("ahk_id " hwnd)
+        this._SetStatus("已锁定 " exe " #" index "：" title)
+    }
+
+    /** 最小化 AutoKey 后点选顶层窗口；选择点击不会传给目标程序 */
+    _PickTargetInteractively(dialog) {
+        if this._capturing
+            return 0
+        this._capturing := true
+        this._pickConfirmed := false
+        this._pickCancelled := false
+        pickedHwnd := 0
+        failureMessage := ""
+        confirmClick := (*) => this._pickConfirmed := true
+        cancelPick := (*) => this._pickCancelled := true
+        clickHookOn := false
+        escapeHookOn := false
+
+        try {
+            this._UnbindHotkeys()
+            dialog.Hide()
+            WinMinimize("ahk_id " this.gui.Hwnd)
+            KeyWait "LButton"
+            Hotkey "*LButton", confirmClick, "On"
+            clickHookOn := true
+            Hotkey "*Escape", cancelPick, "On"
+            escapeHookOn := true
+            thisPid := DllCall("GetCurrentProcessId", "UInt")
+
+            loop {
+                MouseGetPos(&screenX, &screenY, &hoverHwnd)
+                ToolTip("请点击要控制的目标窗口`nEsc 取消", screenX + 18, screenY + 18)
+                if this._pickCancelled {
+                    KeyWait "Escape"
+                    break
+                }
+                if this._pickConfirmed {
+                    rootHwnd := hoverHwnd ? DllCall("GetAncestor", "Ptr", hoverHwnd, "UInt", 2, "Ptr") : 0
+                    if (!rootHwnd || WinGetPID("ahk_id " rootHwnd) = thisPid) {
+                        KeyWait "LButton"
+                        this._pickConfirmed := false
+                        continue
+                    }
+                    pickedHwnd := rootHwnd + 0
+                    KeyWait "LButton"
+                    break
+                }
+                Sleep 15
+            }
+        } catch as e {
+            pickedHwnd := 0
+            failureMessage := e.Message
+        } finally {
+            if clickHookOn {
+                KeyWait "LButton"
+                try Hotkey "*LButton", "Off"
+            }
+            if escapeHookOn {
+                KeyWait "Escape"
+                try Hotkey "*Escape", "Off"
+            }
+            ToolTip()
+            this._capturing := false
+            if this.cfg
+                this._RebindAllHotkeys()
+            try WinRestore("ahk_id " this.gui.Hwnd)
+            this.gui.Show()
+            dialog.Show()
+            try WinActivate("ahk_id " dialog.Hwnd)
+        }
+        if (failureMessage != "")
+            this._SetStatus("选择窗口失败: " failureMessage)
+        else if !pickedHwnd
+            this._SetStatus("已取消选择窗口")
+        return pickedHwnd
     }
 
     ; ───────── 热键 / 运行 ─────────
