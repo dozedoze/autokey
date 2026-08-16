@@ -316,6 +316,8 @@ class MacroStore {
         ; 全局热键（不属于某一套配置）
         this.startSelectedHotkey := "^F9"
         this.stopAllHotkey := "F12"
+        ; 全局依次启动范围：空 = 全部配置
+        this.batchStartIds := []
         this._Load()
         if (this.macros.Length = 0)
             this._SeedDefaults()
@@ -445,8 +447,72 @@ class MacroStore {
         this.macros.RemoveAt(idx)
         if (this.activeId = id)
             this.activeId := this.macros[Min(idx, this.macros.Length)].id
+        this._PruneBatchStartIds()
         this.Save()
         return true
+    }
+
+    /** 全局依次启动要用的配置 ID（按列表顺序）。空范围 = 全部 */
+    GetBatchStartIds() {
+        if (this.batchStartIds.Length = 0)
+            return this._AllMacroIds()
+        ids := []
+        for m in this.macros {
+            for want in this.batchStartIds {
+                if (m.id = want) {
+                    ids.Push(m.id)
+                    break
+                }
+            }
+        }
+        return ids.Length ? ids : this._AllMacroIds()
+    }
+
+    SetBatchStartIds(ids) {
+        cleaned := []
+        seen := Map()
+        for id in ids {
+            if (id = "" || seen.Has(id) || !this.GetById(id))
+                continue
+            seen[id] := true
+            cleaned.Push(id)
+        }
+        ; 选中全部时存成空，表示默认「全部」
+        if (cleaned.Length = 0 || cleaned.Length = this.macros.Length)
+            this.batchStartIds := []
+        else
+            this.batchStartIds := cleaned
+        this.Save()
+    }
+
+    ClearBatchStartIds() {
+        this.batchStartIds := []
+        this.Save()
+    }
+
+    IsBatchStartAll() {
+        return this.batchStartIds.Length = 0
+    }
+
+    _AllMacroIds() {
+        ids := []
+        for m in this.macros
+            ids.Push(m.id)
+        return ids
+    }
+
+    _PruneBatchStartIds() {
+        if (this.batchStartIds.Length = 0)
+            return
+        kept := []
+        for id in this.batchStartIds {
+            if this.GetById(id)
+                kept.Push(id)
+        }
+        if (kept.Length = 0 || kept.Length = this.macros.Length)
+            this.batchStartIds := []
+        else
+            this.batchStartIds := kept
     }
 
     SetActive(id) {
@@ -544,6 +610,10 @@ class MacroStore {
         IniWrite(this.activeId, path, "App", "ActiveId")
         IniWrite(this.startSelectedHotkey, path, "App", "StartSelectedHotkey")
         IniWrite(this.stopAllHotkey, path, "App", "StopAllHotkey")
+        batchIds := ""
+        for i, id in this.batchStartIds
+            batchIds .= (i = 1 ? "" : "|") id
+        IniWrite(batchIds, path, "App", "BatchStartIds")
         ids := ""
         for i, m in this.macros {
             ids .= (i = 1 ? "" : "|") m.id
@@ -601,6 +671,15 @@ class MacroStore {
             this.startSelectedHotkey := "^F9"
         if (this.stopAllHotkey = "ERROR")
             this.stopAllHotkey := "F12"
+        this.batchStartIds := []
+        batchRaw := IniRead(path, "App", "BatchStartIds", "")
+        if (batchRaw != "" && batchRaw != "ERROR") {
+            for id in StrSplit(batchRaw, "|") {
+                id := Trim(id)
+                if (id != "")
+                    this.batchStartIds.Push(id)
+            }
+        }
         idsRaw := IniRead(path, "App", "Ids", "")
         if (idsRaw = "" || idsRaw = "ERROR")
             return
@@ -664,6 +743,7 @@ class MacroStore {
             }
             this.macros.Push(m)
         }
+        this._PruneBatchStartIds()
     }
 
     _SeedDefaults() {

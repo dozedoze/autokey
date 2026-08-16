@@ -66,6 +66,7 @@ class AutoKeyApp {
         this._InitTray()
         this._BuildGui()
         this._LoadGlobalHotkeysIntoUi()
+        this._RefreshBatchScopeText()
         this._ReloadMacroList()
         this._LoadActiveIntoUi()
         this._ApplyFromUi(false)
@@ -78,7 +79,7 @@ class AutoKeyApp {
         A_TrayMenu.Add()
         A_TrayMenu.Add("开始当前", (*) => this.Start())
         A_TrayMenu.Add("停止当前", (*) => this.Stop())
-        A_TrayMenu.Add("依次启动选中", (*) => this.StartSelected())
+        A_TrayMenu.Add("依次启动", (*) => this.StartSelected())
         A_TrayMenu.Add("全部停止", (*) => this.StopAll())
         A_TrayMenu.Add("暂停/继续当前", (*) => this.TogglePause())
         A_TrayMenu.Add()
@@ -99,8 +100,12 @@ class AutoKeyApp {
 
         g.AddButton("xm w76", "新建").OnEvent("Click", (*) => this._NewMacro())
         g.AddButton("x+8 w76", "复制").OnEvent("Click", (*) => this._CopyMacro())
+        g.AddButton("xm w76", "全选").OnEvent("Click", (*) => this._SelectAllMacros())
+        g.AddButton("x+8 w76", "设启动范围").OnEvent("Click", (*) => this._SetBatchScopeFromSelection())
+        g.AddButton("xm w160", "启动范围=全部").OnEvent("Click", (*) => this._ClearBatchScope())
         g.AddButton("xm w160", "删除").OnEvent("Click", (*) => this._DeleteMacro())
         g.AddButton("xm w160", "导入旧 ini…").OnEvent("Click", (*) => this._ImportIni())
+        this.txtBatchScope := g.AddText("xm w160 cGray", "全局启动：全部")
 
         ; ── 右侧：编辑区 ──
         g.AddText("ys w540 Section", "名称")
@@ -174,22 +179,23 @@ class AutoKeyApp {
         this.edRepeat := g.AddEdit("x+6 w50 Number", "0")
 
         g.AddText("xm+184 y+10", "开始")
-        this.edStartHk := g.AddEdit("x+6 w56", "F6")
-        g.AddButton("x+4 w44", "捕捉").OnEvent("Click", (*) => this._CaptureInto("start"))
+        this.edStartHk := g.AddEdit("x+6 w64 ReadOnly", "F6")
+        this.edStartHk.OnEvent("Focus", (*) => this._CaptureInto("start"))
         g.AddText("x+8", "停止")
-        this.edStopHk := g.AddEdit("x+6 w56", "F7")
-        g.AddButton("x+4 w44", "捕捉").OnEvent("Click", (*) => this._CaptureInto("stop"))
+        this.edStopHk := g.AddEdit("x+6 w64 ReadOnly", "F7")
+        this.edStopHk.OnEvent("Focus", (*) => this._CaptureInto("stop"))
         g.AddText("x+8", "暂停")
-        this.edPauseHk := g.AddEdit("x+6 w56", "F8")
-        g.AddButton("x+4 w44", "捕捉").OnEvent("Click", (*) => this._CaptureInto("pause"))
+        this.edPauseHk := g.AddEdit("x+6 w64 ReadOnly", "F8")
+        this.edPauseHk.OnEvent("Focus", (*) => this._CaptureInto("pause"))
 
         g.AddText("xm+184 y+10 cGray", "全局")
         g.AddText("x+8", "依次启动")
-        this.edStartSelectedHk := g.AddEdit("x+6 w56", "^F9")
-        g.AddButton("x+4 w44", "捕捉").OnEvent("Click", (*) => this._CaptureInto("startSelected"))
+        this.edStartSelectedHk := g.AddEdit("x+6 w64 ReadOnly", "^F9")
+        this.edStartSelectedHk.OnEvent("Focus", (*) => this._CaptureInto("startSelected"))
         g.AddText("x+8", "全部停止")
-        this.edStopAllHk := g.AddEdit("x+6 w56", "F12")
-        g.AddButton("x+4 w44", "捕捉").OnEvent("Click", (*) => this._CaptureInto("stopAll"))
+        this.edStopAllHk := g.AddEdit("x+6 w64 ReadOnly", "F12")
+        this.edStopAllHk.OnEvent("Focus", (*) => this._CaptureInto("stopAll"))
+        g.AddText("x+8 cGray", "点框后按键")
 
         g.AddGroupBox("x" tabX " y+14 w540 h110", "目标窗口（可留空 = 当前前台）")
         g.AddText("xp+12 yp+22", "进程 exe")
@@ -218,10 +224,10 @@ class AutoKeyApp {
         this.btnPause.OnEvent("Click", (*) => this.TogglePause())
         this.btnStopAll := g.AddButton("x+8 w88", "全部停止")
         this.btnStopAll.OnEvent("Click", (*) => this.StopAll())
-        this.btnStartSelected := g.AddButton("x+8 w96", "依次启动选中")
+        this.btnStartSelected := g.AddButton("x+8 w88", "依次启动")
         this.btnStartSelected.OnEvent("Click", (*) => this.StartSelected())
 
-        g.AddText("xm+172 y+10 cGray w540", "提示：点「选择目标窗口…」后 AutoKey 会最小化，点击目标即自动恢复；仅打开列表时才监听窗口。")
+        g.AddText("xm+172 y+10 cGray w540", "提示：全局依次启动默认全部；左侧多选后点「设启动范围」可限定其中几套。")
 
         this.gui := g
         this._OnModeChange()
@@ -316,6 +322,57 @@ class AutoKeyApp {
         idx := DllCall("SendMessage", "Ptr", this.lbMacros.Hwnd
             , "UInt", 0x019F, "Ptr", 0, "Ptr", 0, "Int") ; LB_GETCARETINDEX
         return idx >= 0 ? idx + 1 : 0
+    }
+
+    _SelectAllMacros() {
+        ids := []
+        for m in this.store.macros
+            ids.Push(m.id)
+        this._SelectMacroIds(ids, this.store.IndexOf(this.store.activeId))
+        this._SetStatus("已全选 " ids.Length " 套配置")
+    }
+
+    _SetBatchScopeFromSelection() {
+        ids := this._GetSelectedMacroIds()
+        if (ids.Length = 0) {
+            MsgBox("请先在左侧用 Ctrl / Shift 选中要纳入全局启动的配置。", "AutoKey", "Icon!")
+            return
+        }
+        this.store.SetBatchStartIds(ids)
+        this._RefreshBatchScopeText()
+        if this.store.IsBatchStartAll()
+            this._SetStatus("全局启动范围已设为全部")
+        else
+            this._SetStatus("全局启动范围已设为 " ids.Length " 套配置")
+    }
+
+    _ClearBatchScope() {
+        this.store.ClearBatchStartIds()
+        this._RefreshBatchScopeText()
+        this._SetStatus("全局启动范围已恢复为全部")
+    }
+
+    _RefreshBatchScopeText() {
+        if !this.HasOwnProp("txtBatchScope")
+            return
+        if this.store.IsBatchStartAll() {
+            this.txtBatchScope.Value := "全局启动：全部"
+            return
+        }
+        names := []
+        for id in this.store.GetBatchStartIds() {
+            m := this.store.GetById(id)
+            if m
+                names.Push(this._CleanMacroName(m.name))
+        }
+        tip := "全局启动：" names.Length " 套"
+        if (names.Length = 1)
+            tip := "全局启动：" names[1]
+        else if (names.Length = 2)
+            tip := "全局启动：" names[1] "+" names[2]
+        else if (names.Length > 2)
+            tip := "全局启动：" names[1] " 等" names.Length "套"
+        this.txtBatchScope.Value := tip
     }
 
     /** 列表显示：名称保持用户输入，窗口信息只作为后缀标识 */
@@ -437,6 +494,7 @@ class AutoKeyApp {
         this._LoadActiveIntoUi()
         this._SyncActiveRefs(false)
         this._RebindAllHotkeys()
+        this._RefreshBatchScopeText()
         this._SetStatus("已删除")
     }
 
@@ -1237,8 +1295,12 @@ class AutoKeyApp {
     ; ───────── 捕捉按键 / 选择目标窗口 ─────────
 
     _CaptureInto(which) {
+        if this._loadingUi || this._capturing
+            return
         this._SetStatus("请按下要绑定的键…（Esc 取消）")
-        key := this._CaptureKey()
+        isHotkey := (which = "start" || which = "stop" || which = "pause"
+            || which = "startSelected" || which = "stopAll")
+        key := this._CaptureKey(isHotkey)
         if (key = "") {
             this._SetStatus("已取消捕捉")
             return
@@ -1260,8 +1322,10 @@ class AutoKeyApp {
     }
 
     _CaptureToEdit(ed) {
+        if this._capturing
+            return
         this._SetStatus("请按下要绑定的键…（Esc 取消）")
-        key := this._CaptureKey()
+        key := this._CaptureKey(false)
         if (key = "") {
             this._SetStatus("已取消捕捉")
             return
@@ -1270,7 +1334,7 @@ class AutoKeyApp {
         this._SetStatus("已捕捉: " key)
     }
 
-    _CaptureKey() {
+    _CaptureKey(asHotkey := false) {
         if this._capturing
             return ""
         this._capturing := true
@@ -1282,12 +1346,29 @@ class AutoKeyApp {
         this._capturing := false
         out := ""
         if (ih.EndReason = "EndKey") {
-            if (ih.EndKey != "Escape")
-                out := this._FormatKeyName(ih.EndKey)
+            if (ih.EndKey != "Escape") {
+                if asHotkey
+                    out := this._FormatHotkeyName(ih.EndKey, ih.EndMods)
+                else
+                    out := this._FormatKeyName(ih.EndKey)
+            }
         }
         if this.cfg
             this._RebindAllHotkeys()
         return out
+    }
+
+    /** 热键名：带修饰键，如 ^F9；功能键不加花括号 */
+    _FormatHotkeyName(endKey, endMods := "") {
+        if (endKey = "")
+            return ""
+        mods := RegExReplace(endMods, "[<>]", "")
+        name := endKey
+        if (name = "Escape")
+            name := "Esc"
+        if (StrLen(name) = 1)
+            name := StrLower(name)
+        return mods name
     }
 
     _FormatKeyName(name) {
@@ -1575,15 +1656,15 @@ class AutoKeyApp {
         this.StartMacro(this.store.activeId)
     }
 
-    /** 按列表顺序启动选中项；每项执行完第一步后才启动下一项 */
+    /** 按配置的全局启动范围依次启动；默认全部，也可只含其中几套 */
     StartSelected() {
-        ids := this._GetSelectedMacroIds()
+        ids := this.store.GetBatchStartIds()
         if (ids.Length = 0) {
-            MsgBox("请先在左侧列表中选择至少一套配置。`n可用 Ctrl 或 Shift 多选。", "AutoKey", "Icon!")
+            MsgBox("没有可启动的配置。", "AutoKey", "Icon!")
             return
         }
         if this._batchStarting {
-            this._SetStatus("选中配置正在依次启动，请稍候")
+            this._SetStatus("正在依次启动，请稍候")
             return
         }
         this._batchQueue := ids.Clone()
@@ -1591,7 +1672,8 @@ class AutoKeyApp {
         this._batchWaitId := ""
         this._batchStarted := 0
         this._batchStarting := true
-        this._SetStatus("准备依次启动 " ids.Length " 个配置…")
+        scope := this.store.IsBatchStartAll() ? "全部" : "范围内"
+        this._SetStatus("准备依次启动" scope " " ids.Length " 个配置…")
         this._BatchStartTick()
     }
 
