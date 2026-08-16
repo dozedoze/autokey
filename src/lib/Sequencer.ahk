@@ -187,15 +187,17 @@ class Sequencer {
                 screenY := NumGet(point, 4, "Int")
             }
 
-            ; 先挪到目标，再按间隔逐次点击（太快游戏常认不出双击）
+            ; 先挪到目标再点。部分 Win10/游戏会吃掉「零时长」Click，
+            ; 所以用 mouse_event 显式按下→按住→抬起，比 AHK Click 更稳。
             CoordMode "Mouse", "Screen"
             MouseMove screenX, screenY, 0
-            Sleep 15
-            btn := (button = "Right") ? "Right" : "Left"
+            Sleep 50
             loop clicks {
                 if this._stopRequested
                     break
-                Click(btn)
+                this._PhysicalMouseButton(button, true)
+                this._SleepChunked(35)
+                this._PhysicalMouseButton(button, false)
                 if (A_Index < clicks && clickGap > 0)
                     this._SleepChunked(clickGap)
             }
@@ -205,6 +207,19 @@ class Sequencer {
                 this._BlockCameraNoise(false)
             this._ReleaseMouse()
         }
+    }
+
+    /**
+     * 底层鼠标按下/抬起。mousemove 能到但 Click 无反应时，
+     * 常见原因是合成点击过短或被过滤；mouse_event 对这类环境更有效。
+     */
+    _PhysicalMouseButton(button := "Left", down := true) {
+        ; MOUSEEVENTF_LEFTDOWN/UP = 0x0002/0x0004；RIGHT = 0x0008/0x0010
+        if (button = "Right")
+            flag := down ? 0x0008 : 0x0010
+        else
+            flag := down ? 0x0002 : 0x0004
+        DllCall("mouse_event", "UInt", flag, "UInt", 0, "UInt", 0, "UInt", 0, "UPtr", 0)
     }
 
     /**
