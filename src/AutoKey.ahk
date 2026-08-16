@@ -179,23 +179,23 @@ class AutoKeyApp {
         this.edRepeat := g.AddEdit("x+6 w50 Number", "0")
 
         g.AddText("xm+184 y+10", "开始")
-        this.edStartHk := g.AddEdit("x+6 w64 ReadOnly", "F6")
-        this.edStartHk.OnEvent("Focus", (*) => this._CaptureInto("start"))
+        this.btnStartHk := g.AddButton("x+6 w72", "F6")
+        this.btnStartHk.OnEvent("Click", (*) => this._CaptureInto("start"))
         g.AddText("x+8", "停止")
-        this.edStopHk := g.AddEdit("x+6 w64 ReadOnly", "F7")
-        this.edStopHk.OnEvent("Focus", (*) => this._CaptureInto("stop"))
+        this.btnStopHk := g.AddButton("x+6 w72", "F7")
+        this.btnStopHk.OnEvent("Click", (*) => this._CaptureInto("stop"))
         g.AddText("x+8", "暂停")
-        this.edPauseHk := g.AddEdit("x+6 w64 ReadOnly", "F8")
-        this.edPauseHk.OnEvent("Focus", (*) => this._CaptureInto("pause"))
+        this.btnPauseHk := g.AddButton("x+6 w72", "F8")
+        this.btnPauseHk.OnEvent("Click", (*) => this._CaptureInto("pause"))
 
         g.AddText("xm+184 y+10 cGray", "全局")
         g.AddText("x+8", "依次启动")
-        this.edStartSelectedHk := g.AddEdit("x+6 w64 ReadOnly", "^F9")
-        this.edStartSelectedHk.OnEvent("Focus", (*) => this._CaptureInto("startSelected"))
+        this.btnStartSelectedHk := g.AddButton("x+6 w72", "^F9")
+        this.btnStartSelectedHk.OnEvent("Click", (*) => this._CaptureInto("startSelected"))
         g.AddText("x+8", "全部停止")
-        this.edStopAllHk := g.AddEdit("x+6 w64 ReadOnly", "F12")
-        this.edStopAllHk.OnEvent("Focus", (*) => this._CaptureInto("stopAll"))
-        g.AddText("x+8 cGray", "点框后按键")
+        this.btnStopAllHk := g.AddButton("x+6 w72", "F12")
+        this.btnStopAllHk.OnEvent("Click", (*) => this._CaptureInto("stopAll"))
+        g.AddText("x+8 cGray", "点按钮改键")
 
         g.AddGroupBox("x" tabX " y+14 w540 h110", "目标窗口（可留空 = 当前前台）")
         g.AddText("xp+12 yp+22", "进程 exe")
@@ -557,13 +557,28 @@ class AutoKeyApp {
     ; ───────── UI ↔ 配置 ─────────
 
     _LoadGlobalHotkeysIntoUi() {
-        this.edStartSelectedHk.Value := this.store.startSelectedHotkey
-        this.edStopAllHk.Value := this.store.stopAllHotkey
+        this._SetHotkeyBtn(this.btnStartSelectedHk, this.store.startSelectedHotkey)
+        this._SetHotkeyBtn(this.btnStopAllHk, this.store.stopAllHotkey)
     }
 
     _ApplyGlobalHotkeysFromUi() {
-        this.store.startSelectedHotkey := Trim(this.edStartSelectedHk.Value)
-        this.store.stopAllHotkey := Trim(this.edStopAllHk.Value)
+        this.store.startSelectedHotkey := this._GetHotkeyBtn(this.btnStartSelectedHk)
+        this.store.stopAllHotkey := this._GetHotkeyBtn(this.btnStopAllHk)
+    }
+
+    _SetHotkeyBtn(btn, hk) {
+        hk := Trim(hk)
+        btn.Text := hk != "" ? hk : "未绑定"
+    }
+
+    _GetHotkeyBtn(btn) {
+        text := Trim(btn.Text)
+        return (text = "" || text = "未绑定" || text = "…") ? "" : text
+    }
+
+    _BlurAfterHotkeyCapture() {
+        ; 捕捉结束后挪走焦点，避免按钮一直保持按下/选中观感
+        try this.btnApply.Focus()
     }
 
     _LoadActiveIntoUi() {
@@ -584,9 +599,9 @@ class AutoKeyApp {
         this.chkLoop.Value := m.loop ? 1 : 0
         this.edLoopDelay.Value := m.loopDelay
         this.edRepeat.Value := m.repeat
-        this.edStartHk.Value := m.startHotkey
-        this.edStopHk.Value := m.stopHotkey
-        this.edPauseHk.Value := m.pauseHotkey
+        this._SetHotkeyBtn(this.btnStartHk, m.startHotkey)
+        this._SetHotkeyBtn(this.btnStopHk, m.stopHotkey)
+        this._SetHotkeyBtn(this.btnPauseHk, m.pauseHotkey)
         this.edExe.Value := m.targetExe
         this.edWinIndex.Value := Integer(m.targetIndex)
         this._lockHwnd := Integer(m.targetHwnd)
@@ -698,9 +713,9 @@ class AutoKeyApp {
         m.loop := this.chkLoop.Value ? 1 : 0
         m.loopDelay := Integer(this.edLoopDelay.Value || 0)
         m.repeat := Integer(this.edRepeat.Value || 0)
-        m.startHotkey := Trim(this.edStartHk.Value) || "F6"
-        m.stopHotkey := Trim(this.edStopHk.Value) || "F7"
-        m.pauseHotkey := Trim(this.edPauseHk.Value) || "F8"
+        m.startHotkey := this._GetHotkeyBtn(this.btnStartHk) || "F6"
+        m.stopHotkey := this._GetHotkeyBtn(this.btnStopHk) || "F7"
+        m.pauseHotkey := this._GetHotkeyBtn(this.btnPauseHk) || "F8"
         m.targetExe := Trim(this.edExe.Value)
         m.targetTitle := ""
         m.targetClass := ""
@@ -1297,11 +1312,25 @@ class AutoKeyApp {
     _CaptureInto(which) {
         if this._loadingUi || this._capturing
             return
+        btn := ""
+        switch which {
+            case "start": btn := this.btnStartHk
+            case "stop": btn := this.btnStopHk
+            case "pause": btn := this.btnPauseHk
+            case "startSelected": btn := this.btnStartSelectedHk
+            case "stopAll": btn := this.btnStopAllHk
+        }
+        oldText := btn ? btn.Text : ""
+        if btn
+            btn.Text := "…"
         this._SetStatus("请按下要绑定的键…（Esc 取消）")
         isHotkey := (which = "start" || which = "stop" || which = "pause"
             || which = "startSelected" || which = "stopAll")
         key := this._CaptureKey(isHotkey)
         if (key = "") {
+            if btn
+                btn.Text := oldText
+            this._BlurAfterHotkeyCapture()
             this._SetStatus("已取消捕捉")
             return
         }
@@ -1312,12 +1341,13 @@ class AutoKeyApp {
                     this._AddSpamKey(key)
                     return
                 }
-            case "start": this.edStartHk.Value := key
-            case "stop": this.edStopHk.Value := key
-            case "pause": this.edPauseHk.Value := key
-            case "startSelected": this.edStartSelectedHk.Value := key
-            case "stopAll": this.edStopAllHk.Value := key
+            case "start": this._SetHotkeyBtn(this.btnStartHk, key)
+            case "stop": this._SetHotkeyBtn(this.btnStopHk, key)
+            case "pause": this._SetHotkeyBtn(this.btnPauseHk, key)
+            case "startSelected": this._SetHotkeyBtn(this.btnStartSelectedHk, key)
+            case "stopAll": this._SetHotkeyBtn(this.btnStopAllHk, key)
         }
+        this._BlurAfterHotkeyCapture()
         this._SetStatus("已捕捉: " key)
     }
 
