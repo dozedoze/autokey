@@ -178,6 +178,9 @@ class Sequencer {
         if !this._TryAcquireMouse()
             return 0
         wheelBlocked := false
+        savedPos := false
+        origX := 0
+        origY := 0
         clicks := MacroConfig.NormalizeClicks(clicks)
         clickGap := MacroConfig.NormalizeClickGap(clickGap)
         try {
@@ -195,6 +198,11 @@ class Sequencer {
             this._BlockCameraNoise(true)
             wheelBlocked := true
 
+            ; 记下点击前光标，点完立刻挪回去，减轻游戏把 MouseMove 当成转视角
+            CoordMode "Mouse", "Screen"
+            MouseGetPos(&origX, &origY)
+            savedPos := true
+
             try {
                 WinActivate("ahk_id " hwnd)
                 WinWaitActive("ahk_id " hwnd, , 0.25)
@@ -209,9 +217,8 @@ class Sequencer {
 
             ; 先挪到目标再点。部分 Win10/游戏会吃掉「零时长」Click，
             ; 所以用 mouse_event 显式按下→按住→抬起，比 AHK Click 更稳。
-            CoordMode "Mouse", "Screen"
-            MouseMove screenX, screenY, 0
-            Sleep 50
+            DllCall("SetCursorPos", "Int", screenX, "Int", screenY)
+            Sleep 30
             loop clicks {
                 if this._stopRequested
                     break
@@ -221,9 +228,13 @@ class Sequencer {
                 if (A_Index < clicks && clickGap > 0)
                     this._SleepChunked(clickGap)
             }
-            Sleep 30
+            Sleep 15
             return 1
         } finally {
+            if savedPos {
+                DllCall("SetCursorPos", "Int", origX, "Int", origY)
+                Sleep 10
+            }
             ; 先解锁，避免关热键异常时门闩泄漏导致三开全体假死
             this._ReleaseMouse()
             if wheelBlocked
