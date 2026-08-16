@@ -127,11 +127,18 @@ class Sequencer {
             case "sleep":
                 return Integer(step.delay)
             case "click":
-                try {
-                    if (this.target.sendMode = "controlsend")
-                        ControlClick("x" step.x " y" step.y, "ahk_id " hwnd, , "Left", 1, "NA")
-                    else
-                        Click step.x, step.y
+                if (this.target.sendMode = "controlsend") {
+                    ControlClick("x" step.x " y" step.y, "ahk_id " hwnd, , "Left", 1, "NA")
+                } else {
+                    point := Buffer(8, 0)
+                    NumPut("Int", Integer(step.x), point, 0)
+                    NumPut("Int", Integer(step.y), point, 4)
+                    if !DllCall("ClientToScreen", "Ptr", hwnd, "Ptr", point)
+                        throw Error("无法换算目标窗口点击坐标")
+                    screenX := NumGet(point, 0, "Int")
+                    screenY := NumGet(point, 4, "Int")
+                    CoordMode "Mouse", "Screen"
+                    Click screenX, screenY
                 }
                 return Integer(step.delay)
             default:

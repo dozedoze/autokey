@@ -137,16 +137,21 @@ class AutoKeyApp {
         this.lvSteps.ModifyCol(3, 230)
         this.lvSteps.ModifyCol(4, 80)
         this.lvSteps.ModifyCol(5, 80)
+        this.lvSteps.OnEvent("DoubleClick", (*) => this._EditStep())
 
-        this.btnStepAdd := g.AddButton("w72", "添加")
-        this.btnStepAdd.OnEvent("Click", (*) => this._AddStep())
-        this.btnStepEdit := g.AddButton("x+6 w72", "编辑")
+        this.btnStepKey := g.AddButton("w88", "添加按键")
+        this.btnStepKey.OnEvent("Click", (*) => this._AddStep("key"))
+        this.btnStepSleep := g.AddButton("x+6 w88", "添加等待")
+        this.btnStepSleep.OnEvent("Click", (*) => this._AddStep("sleep"))
+        this.btnStepClick := g.AddButton("x+6 w88", "添加点击")
+        this.btnStepClick.OnEvent("Click", (*) => this._AddStep("click"))
+        this.btnStepEdit := g.AddButton("x+6 w56", "编辑")
         this.btnStepEdit.OnEvent("Click", (*) => this._EditStep())
-        this.btnStepDel := g.AddButton("x+6 w72", "删除")
+        this.btnStepDel := g.AddButton("x+6 w56", "删除")
         this.btnStepDel.OnEvent("Click", (*) => this._RemoveStep())
-        this.btnStepUp := g.AddButton("x+6 w72", "上移")
+        this.btnStepUp := g.AddButton("x+6 w52", "上移")
         this.btnStepUp.OnEvent("Click", (*) => this._MoveStep(-1))
-        this.btnStepDown := g.AddButton("x+6 w72", "下移")
+        this.btnStepDown := g.AddButton("x+6 w52", "下移")
         this.btnStepDown.OnEvent("Click", (*) => this._MoveStep(1))
 
         ; —— 公共设置（不在 Tab 内）——
@@ -714,17 +719,20 @@ class AutoKeyApp {
 
     ; ───────── 步骤编辑 ─────────
 
-    _AddStep() {
+    _AddStep(kind) {
         if this._IsSingleMode() {
             MsgBox("请先切换到「按键序列」页。", "AutoKey", "Icon!")
             return
         }
-        step := this._StepDialog()
+        step := this._StepDialog(kind)
         if !step
             return
         this.store.Active().steps.Push(step)
         this.store.Save()
         this._RefreshStepList()
+        row := this.store.Active().steps.Length
+        this.lvSteps.Modify(row, "Select Focus Vis")
+        this._SetStatus("已添加" this._StepKindLabel(kind) "步骤")
     }
 
     _EditStep() {
@@ -734,12 +742,13 @@ class AutoKeyApp {
             return
         }
         cur := this.store.Active().steps[row]
-        step := this._StepDialog(cur)
+        step := this._StepDialog(cur.kind, cur)
         if !step
             return
         this.store.Active().steps[row] := step
         this.store.Save()
         this._RefreshStepList()
+        this.lvSteps.Modify(row, "Select Focus Vis")
     }
 
     _RemoveStep() {
@@ -767,37 +776,56 @@ class AutoKeyApp {
         this.lvSteps.Modify(newRow, "Select Focus Vis")
     }
 
-    _StepDialog(existing := unset) {
+    _StepDialog(kind, existing := unset) {
         isEdit := IsSet(existing)
-        s := isEdit ? MacroConfig.CloneStep(existing) : MacroConfig.NewStep("key", "a", 100)
+        s := isEdit ? MacroConfig.CloneStep(existing) : MacroConfig.NewStep(kind, kind = "key" ? "a" : "", kind = "sleep" ? 500 : 100)
 
-        d := Gui("+Owner" this.gui.Hwnd " +AlwaysOnTop", isEdit ? "编辑步骤" : "添加步骤")
+        title := (isEdit ? "编辑" : "添加") this._StepKindLabel(kind)
+        d := Gui("+Owner" this.gui.Hwnd " +AlwaysOnTop", title)
         d.SetFont("s9", "Segoe UI")
-        d.AddText(, "类型")
-        ddl := d.AddDropDownList("w200", ["按键", "等待", "点击"])
-        kindMap := Map("key", 1, "sleep", 2, "click", 3)
-        ddl.Choose(kindMap.Has(s.kind) ? kindMap[s.kind] : 1)
+        edKey := ""
+        edDelay := ""
+        edHold := ""
+        edPoint := ""
+        pickedX := Integer(s.x)
+        pickedY := Integer(s.y)
+        hasPoint := isEdit && kind = "click"
 
-        d.AddText(, "按键（如 a / {Enter} / {Space} / ^c）")
-        edKey := d.AddEdit("w200", s.key)
-        btnCap := d.AddButton("w200", "捕捉按键")
-        btnCap.OnEvent("Click", (*) => this._CaptureToEdit(edKey))
-
-        d.AddText(, "延迟 ms")
-        edDelay := d.AddEdit("w200 Number", s.delay)
-
-        d.AddText(, "按住 ms（仅按键，0=单击）")
-        edHold := d.AddEdit("w200 Number", s.hold)
-
-        d.AddText(, "点击 X（屏幕坐标）")
-        edX := d.AddEdit("w200 Number", s.x)
-        d.AddText(, "点击 Y")
-        edY := d.AddEdit("w200 Number", s.y)
+        switch kind {
+            case "key":
+                d.AddText(, "按键（如 a / {Enter} / {Space} / ^c）")
+                edKey := d.AddEdit("w240", s.key)
+                d.AddButton("w240", "捕捉按键").OnEvent("Click", (*) => this._CaptureToEdit(edKey))
+                d.AddText(, "执行后延迟 ms")
+                edDelay := d.AddEdit("w240 Number", s.delay)
+                d.AddText(, "按住 ms（0=单击）")
+                edHold := d.AddEdit("w240 Number", s.hold)
+            case "sleep":
+                d.AddText(, "等待时长 ms")
+                edDelay := d.AddEdit("w240 Number", s.delay)
+            case "click":
+                d.AddText(, "目标窗口客户区坐标")
+                pointText := hasPoint ? "X=" pickedX "，Y=" pickedY : "尚未拾取"
+                edPoint := d.AddEdit("w240 ReadOnly", pointText)
+                d.AddButton("w240", "拾取坐标…").OnEvent("Click", PickPoint)
+                d.AddText(, "执行后延迟 ms")
+                edDelay := d.AddEdit("w240 Number", s.delay)
+        }
 
         result := ""
 
+        PickPoint(*) {
+            point := this._PickClickPoint(d)
+            if !point
+                return
+            pickedX := point.x
+            pickedY := point.y
+            hasPoint := true
+            edPoint.Value := "X=" pickedX "，Y=" pickedY "（" SubStr(point.title, 1, 24) "）"
+        }
+
         OnOk(*) {
-            step := this._BuildStepFromDialog(ddl, edKey, edDelay, edHold, edX, edY)
+            step := this._BuildStepFromDialog(kind, edKey, edDelay, edHold, pickedX, pickedY, hasPoint)
             if !step
                 return
             result := step
@@ -817,19 +845,158 @@ class AutoKeyApp {
         return result
     }
 
-    _BuildStepFromDialog(ddl, edKey, edDelay, edHold, edX, edY) {
-        kind := ["key", "sleep", "click"][ddl.Value]
+    _BuildStepFromDialog(kind, edKey, edDelay, edHold, x, y, hasPoint := false) {
         delay := Integer(edDelay.Value || 50)
         if (kind = "sleep")
             return MacroConfig.NewStep("sleep", "", delay)
-        if (kind = "click")
-            return MacroConfig.NewStep("click", "", delay, 0, Integer(edX.Value || 0), Integer(edY.Value || 0))
+        if (kind = "click") {
+            if !hasPoint {
+                MsgBox("请先拾取点击位置。", "AutoKey", "Icon!")
+                return ""
+            }
+            return MacroConfig.NewStep("click", "", delay, 0, x, y)
+        }
         key := Trim(edKey.Value)
         if (key = "") {
             MsgBox("请填写按键。", "AutoKey", "Icon!")
             return ""
         }
         return MacroConfig.NewStep("key", key, delay, Integer(edHold.Value || 0))
+    }
+
+    /**
+     * 隐藏 AutoKey 后用十字准星拾取窗口客户区坐标。
+     * 左键确认，Esc 取消；确认后同时把鼠标下窗口绑定为当前目标。
+     */
+    _PickClickPoint(dialog) {
+        if this._capturing
+            return ""
+        this._capturing := true
+        result := ""
+        failureMessage := ""
+        this._pickConfirmed := false
+        this._pickCancelled := false
+        confirmClick := (*) => this._pickConfirmed := true
+        cancelPick := (*) => this._pickCancelled := true
+        clickHookOn := false
+        escapeHookOn := false
+
+        try {
+            this._UnbindHotkeys()
+            dialog.Hide()
+            this.gui.Hide()
+            KeyWait "LButton"
+            Hotkey "*LButton", confirmClick, "On"
+            clickHookOn := true
+            Hotkey "*Escape", cancelPick, "On"
+            escapeHookOn := true
+
+            crossCursor := DllCall("LoadCursor", "Ptr", 0, "Ptr", 32515, "Ptr")
+            thisPid := DllCall("GetCurrentProcessId", "UInt")
+
+            loop {
+                MouseGetPos(&screenX, &screenY, &hoverHwnd)
+                DllCall("SetCursor", "Ptr", crossCursor)
+                ToolTip("十字准星拾取：移动到目标位置后单击`n屏幕坐标 " screenX ", " screenY "　Esc 取消", screenX + 18, screenY + 18)
+
+                if this._pickCancelled {
+                    KeyWait "Escape"
+                    break
+                }
+                if this._pickConfirmed {
+                    rootHwnd := hoverHwnd ? DllCall("GetAncestor", "Ptr", hoverHwnd, "UInt", 2, "Ptr") : 0
+                    if !rootHwnd
+                        rootHwnd := hoverHwnd
+                    if (!rootHwnd || WinGetPID("ahk_id " rootHwnd) = thisPid) {
+                        KeyWait "LButton"
+                        this._pickConfirmed := false
+                        continue
+                    }
+
+                    point := Buffer(8, 0)
+                    NumPut("Int", screenX, point, 0)
+                    NumPut("Int", screenY, point, 4)
+                    if !DllCall("ScreenToClient", "Ptr", rootHwnd, "Ptr", point) {
+                        KeyWait "LButton"
+                        this._pickConfirmed := false
+                        continue
+                    }
+                    clientX := NumGet(point, 0, "Int")
+                    clientY := NumGet(point, 4, "Int")
+                    rect := Buffer(16, 0)
+                    DllCall("GetClientRect", "Ptr", rootHwnd, "Ptr", rect)
+                    width := NumGet(rect, 8, "Int")
+                    height := NumGet(rect, 12, "Int")
+                    if (clientX < 0 || clientY < 0 || clientX >= width || clientY >= height) {
+                        KeyWait "LButton"
+                        this._pickConfirmed := false
+                        ToolTip("请点击窗口的内容区域，不要点击标题栏或边框。")
+                        Sleep 900
+                        continue
+                    }
+
+                    pickedTitle := WinGetTitle("ahk_id " rootHwnd)
+                    this._BindPickedWindow(rootHwnd)
+                    result := {
+                        x: clientX,
+                        y: clientY,
+                        hwnd: rootHwnd + 0,
+                        title: pickedTitle
+                    }
+                    KeyWait "LButton"
+                    break
+                }
+                Sleep 15
+            }
+        } catch as e {
+            result := ""
+            failureMessage := e.Message
+        } finally {
+            if clickHookOn {
+                KeyWait "LButton"
+                try Hotkey "*LButton", "Off"
+            }
+            if escapeHookOn {
+                KeyWait "Escape"
+                try Hotkey "*Escape", "Off"
+            }
+            ToolTip()
+            arrowCursor := DllCall("LoadCursor", "Ptr", 0, "Ptr", 32512, "Ptr")
+            DllCall("SetCursor", "Ptr", arrowCursor)
+            this._capturing := false
+            if this.cfg
+                this._RebindAllHotkeys()
+            this.gui.Show()
+            dialog.Show()
+        }
+
+        if result
+            this._SetStatus("已拾取 " result.title "：客户区坐标 (" result.x ", " result.y ")")
+        else if (failureMessage != "")
+            this._SetStatus("坐标拾取失败: " failureMessage)
+        else
+            this._SetStatus("已取消坐标拾取")
+        return result
+    }
+
+    _BindPickedWindow(hwnd) {
+        exe := WinGetProcessName("ahk_id " hwnd)
+        index := this._IndexOfWindow(exe, hwnd)
+
+        this.edExe.Value := exe
+        this.edTitle.Value := ""
+        this.edClass.Value := ""
+        this.edWinIndex.Value := index
+        this._lockHwnd := hwnd + 0
+        this._UpdateLockText()
+
+        m := this.store.Active()
+        m.targetExe := exe
+        m.targetTitle := ""
+        m.targetClass := ""
+        m.targetIndex := index
+        m.targetHwnd := hwnd + 0
+        this.store.Save()
     }
 
     ; ───────── 捕捉按键 / 取前台 ─────────

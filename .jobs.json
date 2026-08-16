@@ -1,0 +1,97 @@
+{
+  "total_count": 1,
+  "jobs": [
+    {
+      "id": 91337659692,
+      "run_id": 30688066993,
+      "workflow_name": "Build Windows EXE",
+      "head_branch": "main",
+      "run_url": "https://api.github.com/repos/dozedoze/autokey/actions/runs/30688066993",
+      "run_attempt": 1,
+      "node_id": "CR_kwDOTp1p9s8AAAAVRCYVLA",
+      "head_sha": "bcbfc1611f9ec9005f8ee3de6635c61a8c0e17f0",
+      "url": "https://api.github.com/repos/dozedoze/autokey/actions/jobs/91337659692",
+      "html_url": "https://github.com/dozedoze/autokey/actions/runs/30688066993/job/91337659692",
+      "status": "completed",
+      "conclusion": "failure",
+      "created_at": "2026-08-01T06:36:43Z",
+      "started_at": "2026-08-01T06:36:47Z",
+      "completed_at": "2026-08-01T06:37:09Z",
+      "name": "build",
+      "steps": [
+        {
+          "name": "Set up job",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 1,
+          "started_at": "2026-08-01T06:36:49Z",
+          "completed_at": "2026-08-01T06:36:50Z"
+        },
+        {
+          "name": "Run actions/checkout@v4",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 2,
+          "started_at": "2026-08-01T06:36:50Z",
+          "completed_at": "2026-08-01T06:36:56Z"
+        },
+        {
+          "name": "Fetch AutoHotkey v2 + Ahk2Exe (portable)",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 3,
+          "started_at": "2026-08-01T06:36:56Z",
+          "completed_at": "2026-08-01T06:37:04Z"
+        },
+        {
+          "name": "Validate script syntax",
+          "status": "completed",
+          "conclusion": "failure",
+          "number": 4,
+          "started_at": "2026-08-01T06:37:04Z",
+          "completed_at": "2026-08-01T06:37:05Z"
+        },
+        {
+          "name": "Compile AutoKey.exe",
+          "status": "completed",
+          "conclusion": "skipped",
+          "number": 5,
+          "started_at": "2026-08-01T06:37:05Z",
+          "completed_at": "2026-08-01T06:37:05Z"
+        },
+        {
+          "name": "Upload artifact",
+          "status": "completed",
+          "conclusion": "skipped",
+          "number": 6,
+          "started_at": "2026-08-01T06:37:05Z",
+          "completed_at": "2026-08-01T06:37:05Z"
+        },
+        {
+          "name": "Post Run actions/checkout@v4",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 12,
+          "started_at": "2026-08-01T06:37:05Z",
+          "completed_at": "2026-08-01T06:37:07Z"
+        },
+        {
+          "name": "Complete job",
+          "status": "completed",
+          "conclusion": "success",
+          "number": 13,
+          "started_at": "2026-08-01T06:37:07Z",
+          "completed_at": "2026-08-01T06:37:07Z"
+        }
+      ],
+      "check_run_url": "https://api.github.com/repos/dozedoze/autokey/check-runs/91337659692",
+      "labels": [
+        "windows-latest"
+      ],
+      "runner_id": 1000000241,
+      "runner_name": "GitHub Actions 1000000241",
+      "runner_group_id": 0,
+      "runner_group_name": "GitHub Actions"
+    }
+  ]
+}
