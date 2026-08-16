@@ -531,7 +531,7 @@ class AutoKeyApp {
         want := this._IsSingleMode() ? "single" : "sequence"
         if (m.mode != want) {
             m.mode := want
-            this.store.Save()
+            try this.store.Save()
         }
         this._SetStatus(want = "single" ? "当前编辑区: 连发模式" : "当前编辑区: 按键序列")
     }
@@ -543,7 +543,7 @@ class AutoKeyApp {
             return
         if (m.mode != "sequence") {
             m.mode := "sequence"
-            this.store.Save()
+            try this.store.Save()
         }
         if this._IsSingleMode()
             this.tabMode.Value := 2
@@ -556,7 +556,7 @@ class AutoKeyApp {
             return
         if (m.mode != "single") {
             m.mode := "single"
-            this.store.Save()
+            try this.store.Save()
         }
         if !this._IsSingleMode()
             this.tabMode.Value := 1
@@ -1162,7 +1162,7 @@ class AutoKeyApp {
             m.name := cleanName
             this.edName.Value := cleanName
         }
-        this.store.Save()
+        try this.store.Save()
     }
 
     ; ───────── 捕捉按键 / 选择目标窗口 ─────────

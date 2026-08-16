@@ -16,7 +16,8 @@
 - 开始 / 停止 / 暂停热键（支持界面内「捕捉」）
 - 循环次数与间隔可配
 - `Send`（前台）或 `ControlSend`（尽量后台）
-- 配置自动保存到 `data\`，关闭再开仍在
+- 配置自动保存到 `data\`（同级可写时）；若目录只读/无权限，会自动改存到 `%AppData%\AutoKey\`
+- 请先把 Actions 产物**解压到普通文件夹**再运行，不要在压缩包里直接双击，也不要放到 `Program Files`
 - 可导入旧版 `configs\*.ini`（兼容）
 - 打包为绿色 `dist\` 目录，拷走就能跑
 
@@ -114,7 +115,8 @@ $p = "build\build.bat"
 
 1. 把仓库推到 GitHub  
 2. Actions → **Build Windows EXE** → 下载 `AutoKey-windows`  
-3. 解压后在 Windows 上运行 `AutoKey.exe`
+3. **解压到桌面或文档等可写目录**，再运行 `AutoKey.exe`（不要在 zip 里直接打开）
+4. 若仍提示无法保存配置，配置会自动写到 `%AppData%\AutoKey\`；也可手动把整个文件夹拷到非系统目录
 
 ## 注意
 

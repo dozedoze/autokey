@@ -344,22 +344,61 @@ class MacroStore {
 
         fallback := A_AppData "\AutoKey"
         try DirCreate(fallback)
+        ; 便携目录不可写时，尽量把已有配置拷过来，避免用户丢设置
+        for d in candidates {
+            oldIni := d "\macros.ini"
+            if (FileExist(oldIni) && !FileExist(fallback "\macros.ini")) {
+                try FileCopy(oldIni, fallback "\macros.ini")
+                break
+            }
+        }
         this.dataDirCache := fallback
         return fallback
     }
 
+    /** 目录可新建，且已有 macros.ini 时可覆盖（只读/锁定则视为不可写） */
     _IsWritable(dir) {
-        probe := dir "\.write_test"
+        probe := dir "\.write_test_" A_TickCount
         try {
-            FileAppend("", probe)
+            FileAppend("1", probe)
             FileDelete(probe)
+        } catch
+            return false
+        ini := dir "\macros.ini"
+        if !FileExist(ini)
             return true
-        }
-        return false
+        try FileSetAttrib("-R", ini)
+        try {
+            f := FileOpen(ini, "rw")
+            if !IsObject(f)
+                return false
+            f.Close()
+            return true
+        } catch
+            return false
     }
 
     _DataPath() {
         return this._DataDir() "\macros.ini"
+    }
+
+    /** 切到 %AppData%\AutoKey，返回是否切换成功 */
+    _MigrateToAppData() {
+        fallback := A_AppData "\AutoKey"
+        if (StrLower(this._NormPath(this.dataDirCache)) = StrLower(this._NormPath(fallback)))
+            return false
+        try DirCreate(fallback)
+        oldPath := this.path
+        this.dataDirCache := fallback
+        this.path := fallback "\macros.ini"
+        if (FileExist(oldPath) && !FileExist(this.path)) {
+            try FileCopy(oldPath, this.path)
+        }
+        return true
+    }
+
+    _NormPath(p) {
+        return RTrim(p, "\")
     }
 
     Active() {
@@ -433,18 +472,72 @@ class MacroStore {
         ; 写盘期间不允许被定时器线程重入，否则会写出半截 ini
         prevCritical := A_IsCritical
         Critical "On"
-        this._Save()
+        try {
+            this._SaveTo(this.path)
+        } catch as e {
+            ; 常见于：解压到只读目录、macros.ini 只读、杀软占用 → 改写用户目录
+            if this._MigrateToAppData() {
+                try {
+                    this._SaveTo(this.path)
+                } catch as e2 {
+                    Critical prevCritical
+                    throw Error(
+                        "无法保存配置。`n目标: " this.path
+                        . "`n原因: " e2.Message
+                        . "`n`n请把 AutoKey.exe 解压到可写文件夹（不要放在 Program Files / 压缩包内直接运行）。",
+                        -1, e2.Extra
+                    )
+                }
+            } else {
+                Critical prevCritical
+                throw Error(
+                    "无法保存配置。`n目标: " this.path
+                    . "`n原因: " e.Message
+                    . "`n`n请检查该文件是否只读或被其它程序占用。",
+                    -1, e.Extra
+                )
+            }
+        }
         Critical prevCritical
     }
 
-    _Save() {
-        path := this.path
-        dir := this._DataDir()
+    /**
+     * 先写 .tmp 再替换，避免 FileDelete 原文件时「拒绝访问」。
+     * zip/只读属性/杀软锁定时 Delete 常失败，Move/Copy 覆盖更稳。
+     */
+    _SaveTo(path) {
+        dir := RegExReplace(path, "\\[^\\]+$", "")
+        if (dir = "" || dir = path)
+            dir := this._DataDir()
         if !DirExist(dir)
             DirCreate(dir)
-        if FileExist(path)
-            FileDelete(path)
 
+        tmp := path ".tmp"
+        try {
+            if FileExist(tmp) {
+                try FileSetAttrib("-R", tmp)
+                FileDelete(tmp)
+            }
+        }
+
+        this._WriteIni(tmp)
+
+        if FileExist(path) {
+            try FileSetAttrib("-R", path)
+        }
+        try {
+            FileMove(tmp, path, true)
+        } catch {
+            ; Move 覆盖失败时再试 Copy（部分环境对 Delete/Move 更严）
+            FileCopy(tmp, path, true)
+            try {
+                FileSetAttrib("-R", tmp)
+                FileDelete(tmp)
+            }
+        }
+    }
+
+    _WriteIni(path) {
         IniWrite(this.activeId, path, "App", "ActiveId")
         ids := ""
         for i, m in this.macros {
