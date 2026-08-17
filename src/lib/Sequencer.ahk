@@ -13,6 +13,9 @@ class Sequencer {
     static mouseSince := 0
     ; 持锁过久视为泄漏（线程被掐断/异常），允许其它配置抢回，避免全体假死
     static mouseStaleMs := 5000
+    ; 屏外焦点承接窗：挪光标前/后先落到这里，避免游戏把 SetCursorPos 当成转视角
+    static _sinkGui := 0
+    static _sinkHwnd := 0
 
     __New(cfg, target) {
         this.cfg := cfg
@@ -172,6 +175,11 @@ class Sequencer {
      * 真实鼠标点击（对游戏更有效）。
      * 通过全局门闩排队，多套配置同时跑时轮流点各自窗口，不会两只“手”互抢乱点。
      * 点击期间屏蔽滚轮/中键，避免游戏把杂讯当成拉镜头。
+     *
+     * 镜头偏移对策（多开同游戏尤其明显）：
+     * - 挪光标 / 还原光标时，先把前台切到屏外承接窗，再 SetCursorPos；
+     * - 激活目标后尽量不再大幅挪光标，只补点游戏吸回中心造成的漂移；
+     * - 点完先离开游戏窗口，再还原光标，避免「归位」被当成转视角。
      * @returns {Integer} 1=已点击 0=暂时拿不到鼠标（调用方应重试同一步）
      */
     _RealClick(hwnd, clientX, clientY, button := "Left", clicks := 1, clickGap := 80) {
@@ -198,11 +206,16 @@ class Sequencer {
             this._BlockCameraNoise(true)
             wheelBlocked := true
 
-            ; 记下点击前光标，点完立刻挪回去，减轻游戏把 MouseMove 当成转视角
             CoordMode "Mouse", "Screen"
             MouseGetPos(&origX, &origY)
             savedPos := true
 
+            ; 1) 离开当前游戏前台 → 再挪到点击坐标（游戏看不到这次位移）
+            this._ParkFocusAwayFrom(hwnd)
+            DllCall("SetCursorPos", "Int", screenX, "Int", screenY)
+            Sleep 20
+
+            ; 2) 激活目标；光标已在点上
             try {
                 WinActivate("ahk_id " hwnd)
                 WinWaitActive("ahk_id " hwnd, , 0.25)
@@ -214,11 +227,16 @@ class Sequencer {
                 screenX := NumGet(point, 0, "Int")
                 screenY := NumGet(point, 4, "Int")
             }
+            ; 仅当激活后光标被吸走（常见于相对视角）时才微修正，避免无谓大挪动
+            MouseGetPos(&curX, &curY)
+            if (Abs(curX - screenX) > 2 || Abs(curY - screenY) > 2) {
+                DllCall("SetCursorPos", "Int", screenX, "Int", screenY)
+                Sleep 15
+            } else {
+                Sleep 10
+            }
 
-            ; 先挪到目标再点。部分 Win10/游戏会吃掉「零时长」Click，
-            ; 所以用 mouse_event 显式按下→按住→抬起，比 AHK Click 更稳。
-            DllCall("SetCursorPos", "Int", screenX, "Int", screenY)
-            Sleep 30
+            ; 部分 Win10/游戏会吃掉「零时长」Click，用 mouse_event 显式按下→抬起
             loop clicks {
                 if this._stopRequested
                     break
@@ -231,7 +249,10 @@ class Sequencer {
             Sleep 15
             return 1
         } finally {
+            ; 3) 先离开游戏再还原光标，归位位移不会进游戏的相对视角
+            ;    不再把游戏重新置前：不少游戏在获得焦点时会把光标吸到中心，又会抖镜头
             if savedPos {
+                this._ParkFocusAwayFrom(hwnd)
                 DllCall("SetCursorPos", "Int", origX, "Int", origY)
                 Sleep 10
             }
@@ -239,6 +260,44 @@ class Sequencer {
             this._ReleaseMouse()
             if wheelBlocked
                 this._BlockCameraNoise(false)
+        }
+    }
+
+    /**
+     * 把前台从游戏上挪开，落到屏外承接窗。
+     * 这样随后的 SetCursorPos 不会被游戏当成 MouseMove 转镜头。
+     */
+    _ParkFocusAwayFrom(_targetHwnd := 0) {
+        sink := Sequencer.EnsureFocusSink()
+        if !sink
+            return
+        try {
+            if (WinExist("A") = sink)
+                return
+        }
+        try {
+            WinActivate("ahk_id " sink)
+            WinWaitActive("ahk_id " sink, , 0.15)
+        }
+        ; 忽略失败：最坏仍走旧路径，不能因承接窗阻断点击
+    }
+
+    /**
+     * 懒创建屏外 1×1 工具窗，作点击前后的焦点沙盒（不进任务栏）。
+     */
+    static EnsureFocusSink() {
+        if (Sequencer._sinkHwnd && DllCall("IsWindow", "Ptr", Sequencer._sinkHwnd))
+            return Sequencer._sinkHwnd
+        try {
+            g := Gui("+ToolWindow -Caption -Border +AlwaysOnTop", "AutoKeyFocusSink")
+            g.Show("x-32000 y-32000 w1 h1 NoActivate")
+            Sequencer._sinkGui := g
+            Sequencer._sinkHwnd := g.Hwnd
+            return Sequencer._sinkHwnd
+        } catch {
+            Sequencer._sinkGui := 0
+            Sequencer._sinkHwnd := 0
+            return 0
         }
     }
 
