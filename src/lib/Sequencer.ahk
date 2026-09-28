@@ -1,8 +1,11 @@
 #Requires AutoHotkey v2.0
 
 /**
- * 按键序列执行器：定时器驱动，避免 ControlSend 阻塞导致停止按钮无响应。
+ * 按键执行器：定时器驱动，避免 ControlSend 阻塞导致停止按钮无响应。
  * 支持多实例并行（每个配置一套 Sequencer）。
+ *
+ * - 连发（mode=single）：每个键按自己的间隔独立计时，互不等待
+ * - 编排（mode=sequence）：按步骤顺序 A → 间隔 → B
  *
  * 真实鼠标点击通过全局门闩排队：多窗口可同时跑，点击会轮流执行，互不抢乱。
  */
@@ -28,7 +31,13 @@ class Sequencer {
         this._stepIndex := 1
         this._loopsDone := 0
         this._hasExecutedStep := false
+        this._spam := []
+        this._holdSince := 0
         this._tickFn := this._Tick.Bind(this)
+    }
+
+    _IsSpam {
+        get => this.cfg && this.cfg.HasOwnProp("mode") && this.cfg.mode = "single"
     }
 
     IsRunning {
@@ -48,14 +57,37 @@ class Sequencer {
         this.paused := false
         this._stopRequested := false
         this._hasExecutedStep := false
-        this._steps := this.cfg.HasMethod("EffectiveSteps") ? this.cfg.EffectiveSteps() : this.cfg.steps
-        if (this._steps.Length = 0) {
-            this.running := false
-            this._Notify("序列为空")
-            return
-        }
+        this._holdSince := 0
+        this._spam := []
+        this._steps := []
         this._stepIndex := 1
         this._loopsDone := 0
+        if this._IsSpam {
+            if this.cfg.HasMethod("EnsureKeys")
+                this.cfg.EnsureKeys()
+            if (this.cfg.keys.Length = 0) {
+                this.running := false
+                this._Notify("连发键位为空")
+                return
+            }
+            now := A_TickCount
+            for k in this.cfg.keys {
+                this._spam.Push({
+                    key: k.key,
+                    interval: Max(0, Integer(k.interval)),
+                    nextDue: now,
+                    fires: 0,
+                    done: false
+                })
+            }
+        } else {
+            this._steps := this.cfg.HasMethod("EffectiveSteps") ? this.cfg.EffectiveSteps() : this.cfg.steps
+            if (this._steps.Length = 0) {
+                this.running := false
+                this._Notify("序列为空")
+                return
+            }
+        }
         this._Notify("运行中")
         ; 一次性定时器：每步结束后再预约下一步，主线程不堵死
         SetTimer(this._tickFn, -1)
@@ -78,7 +110,12 @@ class Sequencer {
             return
         this.paused := !this.paused
         this._Notify(this.paused ? "已暂停" : "运行中")
-        if !this.paused && !this._stopRequested
+        if this.paused {
+            this._HoldClock()
+            return
+        }
+        this._ReleaseHold()
+        if !this._stopRequested
             SetTimer(this._tickFn, -1)
     }
 
@@ -92,12 +129,77 @@ class Sequencer {
 
         hwnd := this.target.EnsureReady()
         if !hwnd {
+            this._HoldClock()
             this._Notify("未找到目标窗口 [" this.target.Describe() "]，等待中…")
             if !this._stopRequested && this.running
                 SetTimer(this._tickFn, -300)
             return
         }
+        this._ReleaseHold()
 
+        if this._IsSpam
+            this._TickSpam(hwnd)
+        else
+            this._TickSequence(hwnd)
+    }
+
+    /**
+     * 连发：每个键按自己的间隔独立计时，互不等待。
+     * 循环关=各按 1 次；循环开且次数 N=各按 N 次；次数 0=一直按。
+     */
+    _TickSpam(hwnd) {
+        now := A_TickCount
+        nextWait := 0x7FFFFFFF
+        active := 0
+        cfg := this.cfg
+
+        for item in this._spam {
+            if item.done
+                continue
+            if (item.nextDue <= now) {
+                try {
+                    this._SendKey(item.key, hwnd, 0)
+                    this._hasExecutedStep := true
+                } catch as e {
+                    this._Notify("发送失败(" e.Message ")，重试中…")
+                    if !this._stopRequested && this.running
+                        SetTimer(this._tickFn, -300)
+                    return
+                }
+                if this._stopRequested || !this.running {
+                    this.running := false
+                    return
+                }
+                item.fires++
+                if !cfg.loop || (cfg.repeat > 0 && item.fires >= cfg.repeat) {
+                    item.done := true
+                    continue
+                }
+                item.nextDue := now + Max(1, Integer(item.interval))
+            }
+            if item.done
+                continue
+            active++
+            remain := item.nextDue - A_TickCount
+            if (remain < nextWait)
+                nextWait := remain
+        }
+
+        if this._stopRequested || !this.running {
+            this.running := false
+            return
+        }
+        if (active = 0) {
+            this.running := false
+            try this.target.Release()
+            this._Notify("已完成")
+            return
+        }
+        SetTimer(this._tickFn, -Max(1, Integer(nextWait)))
+    }
+
+    /** 编排：A → 间隔 → B → 间隔，整轮结束后再加上轮后额外等待。 */
+    _TickSequence(hwnd) {
         if (this._stepIndex > this._steps.Length)
             this._stepIndex := 1
         step := this._steps[this._stepIndex]
@@ -140,7 +242,8 @@ class Sequencer {
                 this._Notify("已完成")
                 return
             }
-            waitMs := Integer(cfg.loopDelay)
+            ; 末步延迟保留，轮间隔只是整轮结束后的额外空隙
+            waitMs := Integer(waitMs) + Integer(cfg.loopDelay)
         }
 
         if this._stopRequested || !this.running {
@@ -148,6 +251,25 @@ class Sequencer {
             return
         }
         SetTimer(this._tickFn, -Max(1, Integer(waitMs)))
+    }
+
+    /** 暂停 / 找不到窗口时冻结连发日程，避免恢复后把欠下的键一次性补完。 */
+    _HoldClock() {
+        if !this._holdSince
+            this._holdSince := A_TickCount
+    }
+
+    _ReleaseHold() {
+        if !this._holdSince
+            return
+        shift := A_TickCount - this._holdSince
+        this._holdSince := 0
+        if (shift <= 0 || this._spam.Length = 0)
+            return
+        for item in this._spam {
+            if !item.done
+                item.nextDue += shift
+        }
     }
 
     /**

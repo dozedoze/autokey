@@ -49,7 +49,7 @@ class MacroConfig {
         this.singleInterval := Integer(this.keys[1].interval)
     }
 
-    /** 运行时实际步骤 */
+    /** 编排模式运行时步骤。连发不再走这里，由 Sequencer 按键独立计时。 */
     EffectiveSteps() {
         if (this.mode = "single") {
             this.EnsureKeys()

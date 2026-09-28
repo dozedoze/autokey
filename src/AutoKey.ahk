@@ -119,7 +119,7 @@ class AutoKeyApp {
 
         ; —— Tab1：连发模式 ——
         this.tabMode.UseTab(1)
-        g.AddText("w516", "可添加多个键位，按列表顺序轮流连发")
+        g.AddText("w516", "每个键按自己的间隔独立连发，互不等待（A 每 80ms、B 每 200ms 各敲各的）")
         this.lvKeys := g.AddListView("w516 r7", ["#", "按键", "间隔ms"])
         this.lvKeys.ModifyCol(1, 36)
         this.lvKeys.ModifyCol(2, 340)
@@ -144,7 +144,7 @@ class AutoKeyApp {
 
         ; —— Tab2：按键序列 ——
         this.tabMode.UseTab(2)
-        g.AddText("w516", "按顺序执行步骤，可含按键 / 等待 / 点击")
+        g.AddText("w516", "按顺序执行：A → 间隔 → B → 间隔；循环时仍会先走完最后一步的延迟")
         this.lvSteps := g.AddListView("w516 r7", ["#", "类型", "内容", "延迟ms", "按住ms"])
         this.lvSteps.ModifyCol(1, 36)
         this.lvSteps.ModifyCol(2, 60)
@@ -174,7 +174,7 @@ class AutoKeyApp {
         ; 明确放在 Tab 底部之后，避免被 Tab 遮挡
         g.AddGroupBox("x" tabX " y" (tabY + tabH + 10) " w540 h118", "循环与热键")
         this.chkLoop := g.AddCheckbox("xp+12 yp+22 Checked", "循环")
-        g.AddText("x+8", "轮间隔 ms")
+        g.AddText("x+8", "轮后额外 ms")
         this.edLoopDelay := g.AddEdit("x+6 w60 Number", "200")
         g.AddText("x+8", "次数(0∞)")
         this.edRepeat := g.AddEdit("x+6 w50 Number", "0")
@@ -664,13 +664,16 @@ class AutoKeyApp {
     }
 
     _OnModeChange() {
+        want := this._IsSingleMode() ? "single" : "sequence"
+        ; 轮后额外只作用于编排整轮结束；连发各键独立计时，不走这一项
+        if this.HasOwnProp("edLoopDelay")
+            this.edLoopDelay.Enabled := (want = "sequence")
         if this._loadingUi
             return
         ; Tab 一切换就落盘模式，避免「配了序列步骤却仍按连发跑」
         m := this.store.Active()
         if !m
             return
-        want := this._IsSingleMode() ? "single" : "sequence"
         if (m.mode != want) {
             m.mode := want
             try this.store.Save()
